@@ -6739,7 +6739,23 @@ function adjustUseQty(direction) {
         }
     }
     val = Math.max(step, val + direction * step);
-    input.value = Math.round(val * 1000) / 1000;
+    val = Math.round(val * 1000) / 1000;
+
+    // Cap at max available at selected location (in current unit)
+    const selectedLoc = document.getElementById('use-location')?.value;
+    if (selectedLoc && _useCurrentItems.length > 0) {
+        const locItems = _useCurrentItems.filter(i => i.location === selectedLoc);
+        const maxQtyAtLoc = locItems.reduce((s, i) => s + parseFloat(i.quantity || 0), 0);
+        if (maxQtyAtLoc > 0) {
+            // Convert to sub-unit for comparison if needed
+            const maxInCurrentUnit = (_useConfMode && _useConfMode._activeUnit === 'sub')
+                ? maxQtyAtLoc * _useConfMode.packageSize
+                : maxQtyAtLoc;
+            val = Math.min(val, Math.round(maxInCurrentUnit * 1000) / 1000);
+        }
+    }
+
+    input.value = val;
     // Sync fraction button highlight if visible
     const newVal = parseFloat(input.value);
     document.querySelectorAll('#pz-fraction-btns .frac-btn').forEach(b => {
@@ -7235,12 +7251,8 @@ async function submitUse(e) {
     e.preventDefault();
     if (_useSubmitting) return; // prevent double-submit from scale auto-confirm
     _useSubmitting = true;
-    // Stop timers but KEEP _scaleLastConfirmedGrams: this prevents the scale from
-    // re-triggering another auto-submit while the product is still on the plate.
-    // (Calling _cancelScaleAutoConfirm(false) would reset the sentinel to null,
-    //  allowing the same weight to start a new 10-second cycle immediately.)
     _cancelScaleTimersOnly();
-    _scaleStabilityVal = null; // reset sentinel so a new DIFFERENT weight restarts correctly
+    _scaleStabilityVal = null;
     showLoading(true);
     try {
         let qty = parseFloat(document.getElementById('use-quantity').value) || 1;
@@ -7254,6 +7266,22 @@ async function submitUse(e) {
         } else if (_useConfMode && _useConfMode._activeUnit === 'conf') {
             displayUnit = 'conf';
         }
+
+        // ── Validate: cannot use more than available at selected location ─────────
+        const selectedLoc = document.getElementById('use-location').value;
+        const locItems = _useCurrentItems.filter(i => i.location === selectedLoc);
+        const maxQtyAtLoc = locItems.reduce((s, i) => s + parseFloat(i.quantity || 0), 0);
+        if (maxQtyAtLoc > 0 && qty > maxQtyAtLoc + 0.001) {
+            showLoading(false);
+            _useSubmitting = false;
+            showToast(t('use.error_exceeds_stock'), 'error');
+            // Shake the input to make it obvious
+            const inp = document.getElementById('use-quantity');
+            inp.classList.add('input-shake');
+            setTimeout(() => inp.classList.remove('input-shake'), 600);
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────────
         
         const result = await api('inventory_use', {}, 'POST', {
             product_id: currentProduct.id,

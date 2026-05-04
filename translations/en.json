@@ -241,7 +241,8 @@
         "toast_bring": "🛒 Product finished → added to Bring!",
         "toast_opened_finished": "🔓 Opened package of {name} finished!",
         "disambiguation_hint": "What do you mean by \"all done\"?",
-        "disambiguation_all": "🗑️ Finish EVERYTHING ({qty})"
+        "disambiguation_all": "🗑️ Finish EVERYTHING ({qty})",
+        "error_exceeds_stock": "⚠️ You cannot use more than you have available!"
     },
     "product": {
         "title_new": "New Product",

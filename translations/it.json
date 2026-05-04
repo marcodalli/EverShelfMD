@@ -241,7 +241,8 @@
         "toast_bring": "🛒 Prodotto finito → aggiunto a Bring!",
         "toast_opened_finished": "🔓 Confezione aperta di {name} finita!",
         "disambiguation_hint": "Cosa intendi con \"finito tutto\"?",
-        "disambiguation_all": "🗑️ Finito TUTTO ({qty})"
+        "disambiguation_all": "🗑️ Finito TUTTO ({qty})",
+        "error_exceeds_stock": "⚠️ Non puoi usare più di quanto hai disponibile!"
     },
     "product": {
         "title_new": "Nuovo Prodotto",
@@ -690,7 +691,7 @@
         "item_added": "{name} aggiunto"
     },
     "antiwaste": {
-        "title": "🌱 Anti-Waste Report",
+        "title": "🌱 Rapporto Anti-Spreco",
         "grade_label": "Voto",
         "you": "Tu",
         "avg_label": "Media",
