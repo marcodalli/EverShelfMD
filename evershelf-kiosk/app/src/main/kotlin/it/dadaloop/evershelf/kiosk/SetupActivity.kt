@@ -868,7 +868,7 @@ class SetupActivity : AppCompatActivity() {
                                 val msg = intent?.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status=$status"
                                 setGatewayUI("❌", getString(R.string.install_error_install), msg, 0xFFf87171.toInt())
                                 ErrorReporter.reportMessage(
-                                    "install-failure",
+                                    "install_failure",
                                     "PackageInstaller failed: status=$status msg=$msg",
                                     mapOf("pkg" to targetPkg, "status" to status, "msg" to msg)
                                 )

@@ -5691,7 +5691,7 @@ function reportError(): void {
     // Exception: install/update errors are ALWAYS reported regardless of version,
     // because a device that is failing to install the update is by definition on
     // an old version — suppressing the issue is the opposite of useful.
-    $installErrorTypes = ['install_download_failed', 'install_failure', 'install_packager_exception'];
+    $installErrorTypes = ['install_download_failed', 'install_failure', 'install-failure', 'install_packager_exception'];
     $bypassVersionGuard = in_array($type, $installErrorTypes, true)
         || ($context['version_guard_bypass'] ?? false);
     if (!$bypassVersionGuard && !_isLatestVersion($version)) {
