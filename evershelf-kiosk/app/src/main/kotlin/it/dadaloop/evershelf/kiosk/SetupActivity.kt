@@ -564,7 +564,7 @@ class SetupActivity : AppCompatActivity() {
             else getString(R.string.setup_discovering_detail)
             runOnUiThread { discoverStatus.text = "📡  $detectedLabel" }
 
-            val ports = listOf(80, 8080)
+            val ports = listOf(443, 80, 8080, 8443)
             val paths = listOf(
                 "/api/index.php?action=get_settings",
                 "/dispensa/api/index.php?action=get_settings",
