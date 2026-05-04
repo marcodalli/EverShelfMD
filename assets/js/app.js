@@ -8006,7 +8006,8 @@ async function autoAddCriticalItems() {
         if (i.on_bring) return false;
         // For imminent items, do not honor local "purchased" blocklist too aggressively.
         // If they are predicted to finish within a week, keep Bring aligned automatically.
-        if (!imminentWeek && _isBringPurchased(i.name, i.urgency)) return false;
+        // Bypass blocklist for depleted items (current_qty=0) — they ran out and must be re-added
+        if (!imminentWeek && (i.current_qty ?? 0) > 0 && _isBringPurchased(i.name, i.urgency)) return false;
         if (i.urgency === 'critical') return true;
         if (i.urgency === 'high') return true;
         if (i.urgency === 'medium' && (i.days_left ?? 999) <= 7 && (i.uses_per_month || 0) >= 3) return true;
@@ -8036,6 +8037,7 @@ async function forceSyncBring() {
     localStorage.removeItem('_bringPurchasedBlocklist');
     localStorage.removeItem('_autoAddedCriticalTs');
     localStorage.removeItem('_bringCleanupTs');
+    localStorage.removeItem('_userPinnedBring');
     logOperation('force_sync_bring', {});
     // Reload everything from scratch
     await loadShoppingList();
@@ -8075,14 +8077,28 @@ async function cleanupObsoleteBringItems() {
         }
     }
 
-    // Build: any matching token → smart item (critical/high only)
-    const urgentSmartByToken = new Map();
+    // Build: any matching token → smart item (any urgency — all predictions are protected)
+    const smartByToken = new Map();
     for (const si of smartShoppingItems) {
-        if (si.urgency !== 'critical' && si.urgency !== 'high') continue;
         for (const tok of _nameTokens(si.name)) {
-            if (!urgentSmartByToken.has(tok)) urgentSmartByToken.set(tok, si);
+            if (!smartByToken.has(tok)) smartByToken.set(tok, si);
         }
     }
+
+    // User-pinned: items manually added via the suggestions panel — never auto-remove
+    let userPinned;
+    try {
+        const raw = localStorage.getItem('_userPinnedBring');
+        const map = raw ? JSON.parse(raw) : {};
+        // Prune entries older than 30 days
+        const now = Date.now();
+        let changed = false;
+        for (const k of Object.keys(map)) {
+            if (now - map[k] > 30 * 24 * 60 * 60 * 1000) { delete map[k]; changed = true; }
+        }
+        if (changed) localStorage.setItem('_userPinnedBring', JSON.stringify(map));
+        userPinned = map;
+    } catch(e) { userPinned = {}; }
 
     const toRemove = [];
     for (const item of shoppingItems) {
@@ -8093,13 +8109,14 @@ async function cleanupObsoleteBringItems() {
         // No inventory stock for any related product → nothing to remove
         if (stockQty <= 0) continue;
 
-        // Check if smart shopping flags something with a matching token as urgently needed
-        const urgSi = itemTokens.map(tok => urgentSmartByToken.get(tok)).find(Boolean);
-        if (urgSi) {
-            // Smart says something with this root token is urgent.
-            // If the flagged product still has qty > 0, it's genuinely running low → keep.
-            // If depleted (qty=0) but we have equivalent stock via another token → remove.
-            if (urgSi.current_qty > 0) continue;
+        // Never remove items the user explicitly pinned from suggestions
+        if (userPinned[item.name.toLowerCase()]) continue;
+
+        // Check if smart shopping flags something with a matching token as needed (any urgency)
+        const smartSi = itemTokens.map(tok => smartByToken.get(tok)).find(Boolean);
+        if (smartSi) {
+            // Smart still predicts this item will be needed and it has remaining stock → keep it
+            if (smartSi.current_qty > 0) continue;
         }
 
         toRemove.push(item);
@@ -8497,6 +8514,13 @@ async function addSmartToBring() {
                 ? t('shopping.added_to_bring', { n: result.added }) + (result.skipped > 0 ? ` (${t('shopping.added_to_bring_skip', { n: result.skipped })})` : '')
                 : t('shopping.all_on_bring');
             showToast(msg, result.added > 0 ? 'success' : 'info');
+            // Mark all manually-added items as user-pinned so cleanupObsoleteBringItems never removes them
+            if (result.added > 0) {
+                const pinned = JSON.parse(localStorage.getItem('_userPinnedBring') || '{}');
+                const now = Date.now();
+                for (const it of itemsToAdd) pinned[it.name.toLowerCase()] = now;
+                localStorage.setItem('_userPinnedBring', JSON.stringify(pinned));
+            }
             // Reload to refresh badges
             loadShoppingList();
         } else {
