@@ -242,7 +242,8 @@
         "toast_bring": "🛒 Produkt aufgebraucht → zu Bring! hinzugefügt",
         "toast_opened_finished": "🔓 Geöffnete Packung von {name} aufgebraucht!",
         "disambiguation_hint": "Was meinst du mit \"alles aufgebraucht\"?",
-        "disambiguation_all": "🗑️ ALLES aufgebraucht ({qty})"
+        "disambiguation_all": "🗑️ ALLES verbraucht ({qty})",
+        "error_exceeds_stock": "⚠️ Du kannst nicht mehr verwenden als du verfügbar hast!"
     },
     "product": {
         "title_new": "Neues Produkt",
@@ -691,7 +692,7 @@
         "item_added": "{name} hinzugefügt"
     },
     "antiwaste": {
-        "title": "🌱 Anti-Waste Report",
+        "title": "🌱 Anti-Verschwendungs-Bericht",
         "grade_label": "Note",
         "you": "Du",
         "avg_label": "Ø",
