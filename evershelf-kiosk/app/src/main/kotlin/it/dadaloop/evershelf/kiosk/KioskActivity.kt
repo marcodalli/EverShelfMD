@@ -644,50 +644,110 @@ class KioskActivity : AppCompatActivity() {
         try {
             val pi     = packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            params.setAppPackageName(targetPkg)
+            // Note: setAppPackageName() is intentionally omitted — it causes STATUS_FAILURE (1)
+            // on some OEM/Android versions even when the package name is correct.
             val sessionId = pi.createSession(params)
-            pi.openSession(sessionId).use { session ->
+            val session   = pi.openSession(sessionId)
+            try {
                 file.inputStream().use { input ->
                     session.openWrite("package", 0, file.length()).use { out ->
                         input.copyTo(out)
                         session.fsync(out)
                     }
                 }
-                val action = "it.dadaloop.evershelf.kiosk.INSTALL_RESULT_$sessionId"
-                val resultReceiver = object : BroadcastReceiver() {
-                    override fun onReceive(ctx: Context?, intent: Intent?) {
-                        unregisterReceiver(this)
-                        val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE) ?: PackageInstaller.STATUS_FAILURE
-                        when (status) {
-                            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+            } catch (e: Exception) {
+                try { session.abandon() } catch (_: Exception) {}
+                throw e
+            }
+            // Do NOT close() the session after commit — it is now owned by the system.
+            val action = "it.dadaloop.evershelf.kiosk.INSTALL_RESULT_$sessionId"
+            val resultReceiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE) ?: PackageInstaller.STATUS_FAILURE
+                    when (status) {
+                        PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                            // Do NOT unregister here — the final result arrives as a second broadcast
+                            @Suppress("DEPRECATION")
+                            val confirmIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                                intent?.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                            else intent?.getParcelableExtra(Intent.EXTRA_INTENT)
+                            if (confirmIntent != null) {
+                                pendingInstallFile = file
+                                pendingInstallPkg  = targetPkg
+                                setInstallUI("\u23F3", getString(R.string.install_installing), getString(R.string.install_confirm_detail), 0xFF94a3b8.toInt(), btnEnabled = false)
                                 @Suppress("DEPRECATION")
-                                val confirmIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                                    intent?.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-                                else intent?.getParcelableExtra(Intent.EXTRA_INTENT)
-                                if (confirmIntent != null) {
-                                    pendingInstallFile = file
-                                    pendingInstallPkg  = targetPkg
-                                    setInstallUI("\u23F3", getString(R.string.install_installing), getString(R.string.install_confirm_detail), 0xFF94a3b8.toInt(), btnEnabled = false)
-                                    @Suppress("DEPRECATION")
-                                    startActivityForResult(confirmIntent, INSTALL_CONFIRM_REQUEST)
-                                }
+                                startActivityForResult(confirmIntent, INSTALL_CONFIRM_REQUEST)
+                            } else {
+                                unregisterReceiver(this)
+                                setInstallUI("\u274C", getString(R.string.install_error_install), "No confirmation intent", 0xFFf87171.toInt(), btnEnabled = true, progress = -2)
                             }
-                            PackageInstaller.STATUS_SUCCESS -> {
-                                setInstallUI("\u2705", getString(R.string.install_success), getString(R.string.install_success_detail), 0xFF34d399.toInt(), btnEnabled = false, progress = -2)
-                                Handler(Looper.getMainLooper()).postDelayed({
-                                    updateBanner.visibility = View.GONE
-                                    bannerProgressBar.visibility = View.GONE
-                                }, 3000)
+                        }
+                        PackageInstaller.STATUS_SUCCESS -> {
+                            unregisterReceiver(this)
+                            setInstallUI("\u2705", getString(R.string.install_success), getString(R.string.install_success_detail), 0xFF34d399.toInt(), btnEnabled = false, progress = -2)
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                updateBanner.visibility = View.GONE
+                                bannerProgressBar.visibility = View.GONE
+                            }, 3000)
+                        }
+                        PackageInstaller.STATUS_FAILURE_INCOMPATIBLE,
+                        PackageInstaller.STATUS_FAILURE_CONFLICT -> {
+                            unregisterReceiver(this)
+                            runOnUiThread {
+                                pendingInstallFile = file
+                                pendingInstallPkg  = targetPkg
+                                androidx.appcompat.app.AlertDialog.Builder(this@KioskActivity)
+                                    .setTitle("⚠️ Conflitto firma APK")
+                                    .setMessage("L'app installata usa una firma diversa.\n\nDisinstalla la versione precedente: al termine l'installazione riparte automaticamente.")
+                                    .setPositiveButton("Disinstalla") { _, _ ->
+                                        disableKioskLock()
+                                        @Suppress("DEPRECATION")
+                                        startActivityForResult(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:$targetPkg")), UNINSTALL_REQUEST)
+                                    }
+                                    .setNegativeButton("Annulla", null).show()
                             }
-                            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE,
-                            PackageInstaller.STATUS_FAILURE_CONFLICT -> {
+                        }
+                        -1 /* STATUS_FAILURE_ABORTED */ -> {
+                            unregisterReceiver(this)
+                            runOnUiThread { activeInstallBtn?.text = getString(R.string.install_btn_retry) }
+                        }
+                        else -> {
+                            unregisterReceiver(this)
+                            val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
+                            val deviceLabel = buildDeviceLabel()
+                            val diagInfo = buildString {
+                                appendLine("Status: $status — ${installStatusHint(status)}")
+                                if (msg.isNotEmpty()) appendLine("Msg: $msg")
+                                appendLine("PKG: $targetPkg")
+                                appendLine("APK: ${file.length() / 1024} KB")
+                                appendLine("Android: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})")
+                                appendLine("Device: $deviceLabel")
+                            }
+                            setInstallUI("\u274C", getString(R.string.install_error_install),
+                                diagInfo.trim(), 0xFFf87171.toInt(), btnEnabled = true, progress = -2)
+                            runOnUiThread { activeInstallBtn?.text = getString(R.string.install_btn_retry) }
+                            ErrorReporter.reportMessage(
+                                "install_failure",
+                                "PackageInstaller status=$status pkg=$targetPkg android=${Build.VERSION.SDK_INT}",
+                                mapOf(
+                                    "pkg"     to targetPkg,
+                                    "status"  to status,
+                                    "msg"     to msg,
+                                    "apk_kb"  to (file.length() / 1024),
+                                    "android" to Build.VERSION.SDK_INT,
+                                    "device"  to deviceLabel
+                                ),
+                                forceReport = true
+                            )
+                            val pkgInstalled = try { packageManager.getPackageInfo(targetPkg, 0); true } catch (_: Exception) { false }
+                            if (pkgInstalled) {
                                 runOnUiThread {
                                     pendingInstallFile = file
                                     pendingInstallPkg  = targetPkg
                                     androidx.appcompat.app.AlertDialog.Builder(this@KioskActivity)
-                                        .setTitle("⚠️ Conflitto firma APK")
-                                        .setMessage("L'app installata usa una firma diversa.\n\nDisinstalla la versione precedente: al termine l'installazione riparte automaticamente.")
-                                        .setPositiveButton("Disinstalla") { _, _ ->
+                                        .setTitle("⚠️ Installazione fallita (status=$status)")
+                                        .setMessage(diagInfo.trim())
+                                        .setPositiveButton("Disinstalla e riprova") { _, _ ->
                                             disableKioskLock()
                                             @Suppress("DEPRECATION")
                                             startActivityForResult(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:$targetPkg")), UNINSTALL_REQUEST)
@@ -695,46 +755,46 @@ class KioskActivity : AppCompatActivity() {
                                         .setNegativeButton("Annulla", null).show()
                                 }
                             }
-                            else -> {
-                                val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status=$status"
-                                setInstallUI("\u274C", getString(R.string.install_error_install), msg, 0xFFf87171.toInt(), btnEnabled = true, progress = -2)
-                                runOnUiThread { activeInstallBtn?.text = getString(R.string.install_btn_retry) }
-                                ErrorReporter.reportMessage("install_failure", "PackageInstaller status=$status msg=$msg pkg=$targetPkg")
-                                val pkgInstalled = try { packageManager.getPackageInfo(targetPkg, 0); true } catch (_: Exception) { false }
-                                if (pkgInstalled) {
-                                    runOnUiThread {
-                                        pendingInstallFile = file
-                                        pendingInstallPkg  = targetPkg
-                                        androidx.appcompat.app.AlertDialog.Builder(this@KioskActivity)
-                                            .setTitle("⚠️ Installazione fallita")
-                                            .setMessage("Installazione fallita (status=$status).\n\nDisinstalla la versione precedente e riprova?")
-                                            .setPositiveButton("Disinstalla e riprova") { _, _ ->
-                                                disableKioskLock()
-                                                @Suppress("DEPRECATION")
-                                                startActivityForResult(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:$targetPkg")), UNINSTALL_REQUEST)
-                                            }
-                                            .setNegativeButton("Annulla", null).show()
-                                    }
-                                }
-                            }
                         }
                     }
                 }
-                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_NOT_EXPORTED else 0
-                registerReceiver(resultReceiver, IntentFilter(action), flags)
-                val pi2 = PendingIntent.getBroadcast(
-                    this, sessionId,
-                    Intent(action).setPackage(packageName),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                session.commit(pi2.intentSender)
             }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_NOT_EXPORTED else 0
+            registerReceiver(resultReceiver, IntentFilter(action), flags)
+            val pi2 = PendingIntent.getBroadcast(
+                this, sessionId,
+                Intent(action).setPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            session.commit(pi2.intentSender)
             setInstallUI("\u23F3", getString(R.string.install_installing), getString(R.string.install_installing), 0xFF94a3b8.toInt(), btnEnabled = false, progress = -1)
         } catch (e: Exception) {
-            setInstallUI("\u274C", getString(R.string.install_error_download), e.message ?: "", 0xFFf87171.toInt(), btnEnabled = true, progress = -2)
+            setInstallUI("\u274C", getString(R.string.install_error_install), e.message ?: "", 0xFFf87171.toInt(), btnEnabled = true, progress = -2)
             runOnUiThread { activeInstallBtn?.text = getString(R.string.install_btn_retry) }
-            ErrorReporter.reportMessage("install_packager_exception", "installWithPackageInstaller exception for $targetPkg: ${e.message}")
+            ErrorReporter.reportMessage("install_packager_exception",
+                "installWithPackageInstaller exception for $targetPkg: ${e.message}",
+                forceReport = true)
         }
+    }
+
+    private fun buildDeviceLabel(): String {
+        val mfr   = Build.MANUFACTURER.takeIf { it.isNotBlank() && it != "unknown" }
+            ?: Build.PRODUCT.takeIf { it.isNotBlank() && it != "unknown" }
+            ?: Build.BOARD
+        val model = Build.MODEL.takeIf { it.isNotBlank() && it != "unknown" }
+            ?: Build.HARDWARE
+        return "$mfr $model"
+    }
+
+    private fun installStatusHint(status: Int): String = when (status) {
+        1    -> "Errore generico (APK incompatibile con questo dispositivo o versione Android)"
+        2    -> "Bloccato da policy o da un'altra app in corso"
+        3    -> "Annullato dall'utente"
+        4    -> "APK non valido o corrotto"
+        5    -> "Conflitto: versione precedente con firma diversa"
+        6    -> "Spazio insufficiente"
+        7    -> "Incompatibile con questa versione di Android"
+        else -> "Errore sconosciuto"
     }
 
     // ── Error Page ────────────────────────────────────────────────────────

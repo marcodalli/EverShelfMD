@@ -913,28 +913,48 @@ class SetupActivity : AppCompatActivity() {
                             unregisterReceiver(this)
                             val msg = intent?.getStringExtra(
                                 android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE
-                            ) ?: "status=$status"
+                            ) ?: ""
+                            val deviceLabel = buildString {
+                                val mfr = Build.MANUFACTURER.takeIf { it.isNotBlank() && it != "unknown" }
+                                    ?: Build.PRODUCT.takeIf { it.isNotBlank() && it != "unknown" }
+                                    ?: Build.BOARD
+                                val model = Build.MODEL.takeIf { it.isNotBlank() && it != "unknown" }
+                                    ?: Build.HARDWARE
+                                append("$mfr $model")
+                            }
+                            val hint = when (status) {
+                                1    -> "APK incompatibile con questo dispositivo o versione Android"
+                                2    -> "Bloccato da policy o da un'altra installazione in corso"
+                                3    -> "Annullato"
+                                4    -> "APK non valido o corrotto"
+                                5    -> "Conflitto: versione precedente con firma diversa"
+                                6    -> "Spazio insufficiente"
+                                7    -> "Incompatibile con questa versione di Android"
+                                else -> "Errore sconosciuto"
+                            }
                             val diagInfo = buildString {
-                                appendLine("Status: $status")
-                                appendLine("Msg: $msg")
-                                appendLine("PKG: $targetPkg")
+                                appendLine("❌ Status $status: $hint")
+                                if (msg.isNotEmpty()) appendLine("Dettaglio: $msg")
+                                appendLine("Pacchetto: $targetPkg")
                                 appendLine("APK: ${file.length() / 1024} KB")
                                 appendLine("Android: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})")
-                                appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                                appendLine("Dispositivo: $deviceLabel")
                             }
                             setGatewayUI("❌", getString(R.string.install_error_install),
-                                msg, 0xFFf87171.toInt())
+                                diagInfo.trim(), 0xFFf87171.toInt())
                             ErrorReporter.reportMessage(
                                 "install_failure",
-                                "PackageInstaller failed: status=$status msg=$msg",
+                                "PackageInstaller status=$status pkg=$targetPkg android=${Build.VERSION.SDK_INT}",
                                 mapOf(
                                     "pkg"     to targetPkg,
                                     "status"  to status,
+                                    "hint"    to hint,
                                     "msg"     to msg,
                                     "apk_kb"  to (file.length() / 1024),
                                     "android" to Build.VERSION.SDK_INT,
-                                    "device"  to "${Build.MANUFACTURER} ${Build.MODEL}"
-                                )
+                                    "device"  to deviceLabel
+                                ),
+                                forceReport = true
                             )
                             val pkgInstalled = try {
                                 packageManager.getPackageInfo(targetPkg, 0); true
@@ -943,7 +963,6 @@ class SetupActivity : AppCompatActivity() {
                                 if (pkgInstalled) {
                                     offerUninstallAndRetry(file, targetPkg)
                                 } else {
-                                    // Show diagnostic dialog with Retry button
                                     AlertDialog.Builder(this@SetupActivity)
                                         .setTitle("❌ Installazione fallita (status=$status)")
                                         .setMessage(diagInfo.trim())

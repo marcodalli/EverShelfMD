@@ -64,7 +64,14 @@ object ErrorReporter {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
             appVersion = pi.versionName ?: "unknown"
         } catch (_: Exception) {}
-        deviceInfo = "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})"
+        deviceInfo = buildString {
+            val mfr   = Build.MANUFACTURER.takeIf { it.isNotBlank() && it != "unknown" }
+                ?: Build.PRODUCT.takeIf { it.isNotBlank() && it != "unknown" }
+                ?: Build.BOARD
+            val model = Build.MODEL.takeIf { it.isNotBlank() && it != "unknown" }
+                ?: Build.HARDWARE
+            append("$mfr $model (Android ${Build.VERSION.RELEASE}/${Build.VERSION.SDK_INT})")
+        }
 
         // Send any crash that was saved to prefs during a previous session
         sendPendingCrash()
@@ -110,15 +117,17 @@ object ErrorReporter {
 
     /**
      * Report a non-exception message (e.g. WebView page error, network failure).
+     * @param forceReport if true, bypasses the in-session dedup so retries are always sent.
      */
     fun reportMessage(
         type: String,
         message: String,
-        extra: Map<String, Any?> = emptyMap()
+        extra: Map<String, Any?> = emptyMap(),
+        forceReport: Boolean = false
     ) {
         val ctx = mutableMapOf<String, Any?>("device" to deviceInfo)
         ctx.putAll(extra)
-        reportAsync(type = type, message = message, stack = "", context = ctx)
+        reportAsync(type = type, message = message, stack = "", context = ctx, force = forceReport)
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
@@ -128,10 +137,14 @@ object ErrorReporter {
         return key.hashCode().toString(16)
     }
 
-    private fun reportAsync(type: String, message: String, stack: String, context: Map<String, Any?>) {
+    private fun reportAsync(type: String, message: String, stack: String, context: Map<String, Any?>, force: Boolean = false) {
         val fp = fingerprint(type, message)
-        synchronized(sentFingerprints) {
-            if (!sentFingerprints.add(fp)) return // already reported this session
+        if (!force) {
+            synchronized(sentFingerprints) {
+                if (!sentFingerprints.add(fp)) return // already reported this session
+            }
+        } else {
+            synchronized(sentFingerprints) { sentFingerprints.add(fp) }
         }
         executor.execute { doPost(type, message, stack, context) }
     }
