@@ -89,7 +89,8 @@ class SetupActivity : AppCompatActivity() {
     private lateinit var gatewayStatusIcon:  TextView
     private lateinit var gatewayStatusText:  TextView
     private lateinit var gatewayStatusDetail: TextView
-    private lateinit var btnInstallGateway:  MaterialButton
+    private lateinit var btnInstallGateway:   MaterialButton
+    private lateinit var btnConfigureGateway: MaterialButton
     private lateinit var gatewayProgressBar: ProgressBar
     private lateinit var gatewayProgressText: TextView
     private lateinit var step3NextButtons:   LinearLayout
@@ -212,9 +213,10 @@ class SetupActivity : AppCompatActivity() {
         gatewayInstallCard  = findViewById(R.id.gatewayInstallCard)
         gatewayStatusIcon   = findViewById(R.id.gatewayStatusIcon)
         gatewayStatusText   = findViewById(R.id.gatewayStatusText)
-        gatewayStatusDetail = findViewById(R.id.gatewayStatusDetail)
-        btnInstallGateway   = findViewById(R.id.btnInstallGateway)
-        gatewayProgressBar  = findViewById(R.id.gatewayProgressBar)
+        gatewayStatusDetail  = findViewById(R.id.gatewayStatusDetail)
+        btnInstallGateway    = findViewById(R.id.btnInstallGateway)
+        btnConfigureGateway  = findViewById(R.id.btnConfigureGateway)
+        gatewayProgressBar   = findViewById(R.id.gatewayProgressBar)
         gatewayProgressText = findViewById(R.id.gatewayProgressText)
         step3NextButtons    = findViewById(R.id.step3NextButtons)
 
@@ -281,6 +283,14 @@ class SetupActivity : AppCompatActivity() {
             pendingApkDownloadUrl = GATEWAY_DOWNLOAD_URL
             triggerApkDownload(GATEWAY_DOWNLOAD_URL)
         }
+        btnConfigureGateway.setOnClickListener {
+            val intent = packageManager.getLaunchIntentForPackage(GATEWAY_PACKAGE)
+            if (intent != null) {
+                startActivity(intent)
+            } else {
+                Toast.makeText(this, "Gateway non trovato", Toast.LENGTH_SHORT).show()
+            }
+        }
         findViewById<MaterialButton>(R.id.btnScaleBack).setOnClickListener { showStep(3) }
         findViewById<MaterialButton>(R.id.btnScaleNext).setOnClickListener {
             prefs.edit().putBoolean(KEY_HAS_SCALE, true).apply()
@@ -336,10 +346,20 @@ class SetupActivity : AppCompatActivity() {
 
         // Reset scale step when entering it
         if (step == 4) {
-            scaleQuestionCard.visibility  = View.VISIBLE
-            gatewayInfoCard.visibility    = View.GONE
-            gatewayInstallCard.visibility = View.GONE
-            step3NextButtons.visibility   = View.GONE
+            val scaleAlreadyConfiguredYes = prefs.contains(KEY_HAS_SCALE) && prefs.getBoolean(KEY_HAS_SCALE, false)
+            if (scaleAlreadyConfiguredYes) {
+                // User already confirmed they have a scale — skip the question
+                scaleQuestionCard.visibility  = View.GONE
+                gatewayInfoCard.visibility    = View.VISIBLE
+                gatewayInstallCard.visibility = View.VISIBLE
+                step3NextButtons.visibility   = View.VISIBLE
+                checkGatewayStatus()
+            } else {
+                scaleQuestionCard.visibility  = View.VISIBLE
+                gatewayInfoCard.visibility    = View.GONE
+                gatewayInstallCard.visibility = View.GONE
+                step3NextButtons.visibility   = View.GONE
+            }
         }
 
         // Build summary when entering done step
@@ -682,15 +702,17 @@ class SetupActivity : AppCompatActivity() {
             gatewayStatusText.text = getString(R.string.wizard_gateway_installed)
             gatewayStatusDetail.text = getString(R.string.wizard_gateway_installed_detail)
             gatewayStatusDetail.setTextColor(0xFF34d399.toInt())
-            btnInstallGateway.visibility = View.GONE
-            gatewayProgressBar.visibility = View.GONE
-            gatewayProgressText.visibility = View.GONE
+            btnInstallGateway.visibility    = View.GONE
+            btnConfigureGateway.visibility  = View.VISIBLE
+            gatewayProgressBar.visibility   = View.GONE
+            gatewayProgressText.visibility  = View.GONE
         } else {
             gatewayStatusIcon.text = "📲"
             gatewayStatusText.text = getString(R.string.wizard_gateway_not_installed)
             gatewayStatusDetail.text = getString(R.string.wizard_gateway_not_installed_detail)
             gatewayStatusDetail.setTextColor(0xFFfbbf24.toInt())
-            btnInstallGateway.visibility = View.VISIBLE
+            btnInstallGateway.visibility   = View.VISIBLE
+            btnConfigureGateway.visibility = View.GONE
         }
     }
 

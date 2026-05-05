@@ -141,6 +141,19 @@
                 android:text="No scale connected"
                 android:textColor="#64748b"
                 android:textSize="13sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnConfigureGateway"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="⚙️  Apri Gateway per configurarlo"
+                android:textSize="13sp"
+                android:textAllCaps="false"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:strokeColor="#34d399"
+                android:textColor="#34d399"
+                android:layout_marginTop="12dp"
+                android:visibility="gone" />
         </LinearLayout>
 
         <!-- Screensaver Section -->

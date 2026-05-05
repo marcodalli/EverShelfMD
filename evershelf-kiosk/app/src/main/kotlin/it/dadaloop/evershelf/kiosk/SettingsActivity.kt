@@ -70,6 +70,17 @@ class SettingsActivity : AppCompatActivity() {
             deviceView.text = "Install the Scale Gateway app to use a Bluetooth scale"
         }
 
+        val btnConfigureGateway = findViewById<MaterialButton>(R.id.btnConfigureGateway)
+        if (gatewayInstalled) {
+            btnConfigureGateway.visibility = android.view.View.VISIBLE
+            btnConfigureGateway.setOnClickListener {
+                val intent = packageManager.getLaunchIntentForPackage(GATEWAY_PACKAGE)
+                if (intent != null) startActivity(intent)
+            }
+        } else {
+            btnConfigureGateway.visibility = android.view.View.GONE
+        }
+
         // Back
         findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }
 
@@ -79,7 +90,7 @@ class SettingsActivity : AppCompatActivity() {
         // Run wizard again
         findViewById<MaterialButton>(R.id.btnRunWizard).setOnClickListener {
             prefs.edit().putBoolean(KEY_SETUP_COMPLETE, false).apply()
-            Toast.makeText(this, "Wizard will run on next launch", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, SetupActivity::class.java))
             finish()
         }
 
