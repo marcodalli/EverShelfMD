@@ -11,7 +11,7 @@
     <title>EverShelf</title>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="assets/img/logo/logo_icon.png">
-    <link rel="stylesheet" href="assets/css/style.css?v=20260506b">
+    <link rel="stylesheet" href="assets/css/style.css?v=20260506c">
     <!-- QuaggaJS for barcode scanning -->
     <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
     <!-- @xenova/transformers: ES-module bootstrap that exposes a lazy category-classifier as window._categoryPipelinePromise -->
@@ -152,8 +152,11 @@
             <div id="expired-list"></div>
         </div>
 
-        <!-- Anti-Waste Report Card (content fully rendered by JS) -->
-        <div id="waste-chart-section" style="display:none"></div>
+        <!-- Anti-Waste Report Card + Nutrition Analysis (alternating, content rendered by JS) -->
+        <div id="dashboard-insight-wrap" style="position:relative">
+            <div id="waste-chart-section" style="display:none"></div>
+            <div id="nutrition-section" style="display:none"></div>
+        </div>
 
         <!-- Alert for soonest expiring items -->
         <div class="alert-section" id="alert-expiring" style="display:none">
@@ -1289,6 +1292,8 @@
     <div class="screensaver-content">
         <div class="screensaver-clock" id="screensaver-clock"></div>
         <div id="screensaver-mealplan" class="screensaver-mealplan" style="display:none"></div>
+        <!-- Nutrition pie charts panel (shown alternately with fact) -->
+        <div id="screensaver-nutrition" class="screensaver-nutrition" style="display:none"></div>
         <div class="screensaver-fact" id="screensaver-fact"></div>
     </div>
     <div class="screensaver-shortcuts">

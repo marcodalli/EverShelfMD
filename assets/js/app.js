@@ -2772,6 +2772,205 @@ function _renderAntiWasteSection(used30, wasted30, usedP30, wastedP30, usedP60, 
     }
 }
 
+// ===== NUTRITION ANALYSIS SECTION =====
+// Alternates with waste-chart-section every hour (randomised offset)
+
+// Colour palette for pie slices (matches category colours)
+const _NUTR_COLORS = {
+    'frutta':    '#4ade80', 'verdura':   '#22d3ee',
+    'carne':     '#f87171', 'pesce':     '#60a5fa',
+    'latticini': '#fbbf24', 'pasta':     '#a78bfa',
+    'pane':      '#fb923c', 'cereali':   '#f472b6',
+    'bevande':   '#34d399', 'condimenti':'#94a3b8',
+    'surgelati': '#818cf8', 'conserve':  '#e879f9',
+    'snack':     '#fcd34d', 'altro':     '#64748b',
+};
+
+let _nutriData = null;      // cached result from last inventory fetch
+let _insightFlipTimer = null; // setInterval handle for waste/nutrition alternation
+
+/**
+ * Compute nutrition-related metrics from the current inventory array.
+ * Returns null if not enough data.
+ */
+function _buildNutritionData(inventory) {
+    if (!inventory || inventory.length === 0) return null;
+
+    // Category distribution (product count)
+    const catCounts = {};
+    for (const item of inventory) {
+        const cat = mapToLocalCategory(item.category || '', item.name || '');
+        catCounts[cat] = (catCounts[cat] || 0) + 1;
+    }
+    const total = Object.values(catCounts).reduce((s, v) => s + v, 0);
+
+    // Sorted slices for pie
+    const slices = Object.entries(catCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cat, count]) => ({
+            cat,
+            count,
+            pct: Math.round(count / total * 100),
+            color: _NUTR_COLORS[cat] || '#64748b',
+            icon:  CATEGORY_ICONS[cat] || '📦',
+        }));
+
+    // Health score 0-100 based on category mix
+    // + points for fruit/veg/fish; - for snacks/sweets
+    const healthyCats   = ['frutta','verdura','pesce','carne'];
+    const unhealthyCats = ['snack','bevande'];
+    const healthyCount  = healthyCats.reduce((s, c) => s + (catCounts[c] || 0), 0);
+    const unhealthyCount= unhealthyCats.reduce((s, c) => s + (catCounts[c] || 0), 0);
+    const healthScore   = Math.min(100, Math.max(0,
+        Math.round(50 + (healthyCount / Math.max(total, 1)) * 50 - (unhealthyCount / Math.max(total, 1)) * 30)
+    ));
+
+    // Variety score: number of distinct categories / max(16)
+    const varietyScore = Math.min(100, Math.round(Object.keys(catCounts).length / 16 * 100));
+
+    // Freshness score: % products with expiry date set
+    const withExpiry = inventory.filter(i => i.expiry_date).length;
+    const freshnessScore = Math.round(withExpiry / Math.max(total, 1) * 100);
+
+    // Balance: fraction of fresh (frigo+freezer) vs shelf-stable (dispensa)
+    const fresh = inventory.filter(i => i.location === 'frigo' || i.location === 'freezer').length;
+    const fresh_pct = Math.round(fresh / Math.max(total, 1) * 100);
+
+    return { slices, total, healthScore, varietyScore, freshnessScore, fresh_pct };
+}
+
+/**
+ * Render the nutrition analysis card into #nutrition-section.
+ */
+function _renderNutritionSection(inventory) {
+    const section = document.getElementById('nutrition-section');
+    if (!section) return;
+    const data = _buildNutritionData(inventory);
+    if (!data) { section.style.display = 'none'; return; }
+    _nutriData = data;
+
+    const { slices, total, healthScore, varietyScore, freshnessScore, fresh_pct } = data;
+    const top5 = slices.slice(0, 5);
+
+    // Build conic-gradient for pie
+    let deg = 0;
+    const stops = top5.map(s => {
+        const end = deg + s.pct * 3.6;
+        const stop = `${s.color} ${deg.toFixed(1)}deg ${end.toFixed(1)}deg`;
+        deg = end;
+        return stop;
+    });
+    if (deg < 360) stops.push(`#334155 ${deg.toFixed(1)}deg 360deg`);
+    const gradient = `conic-gradient(from 0deg, ${stops.join(', ')})`;
+
+    // Score colour
+    const scoreColor = healthScore >= 70 ? '#4ade80' : healthScore >= 45 ? '#fbbf24' : '#f87171';
+    const scoreLabel = healthScore >= 70 ? '😄 Ottimo' : healthScore >= 45 ? '🙂 Discreto' : '😬 Migliorabile';
+
+    section.innerHTML = `
+    <div class="nutr-card">
+        <div class="aw-header">
+            <div class="aw-title-row">
+                <span class="aw-live-dot aw-live-on"></span>
+                <h3 class="aw-title">🥗 Analisi Alimentare</h3>
+            </div>
+            <span class="aw-grade" style="background:${scoreColor};font-size:.75rem;padding:4px 10px">${scoreLabel}</span>
+        </div>
+
+        <div class="nutr-body">
+            <!-- 3D animated pie -->
+            <div class="nutr-pie-wrap">
+                <div class="nutr-pie-3d" id="nutr-pie" style="background:${gradient}"></div>
+                <div class="nutr-pie-center">
+                    <span class="nutr-pie-total">${total}</span>
+                    <span class="nutr-pie-label">prodotti</span>
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="nutr-legend">
+                ${top5.map(s => `
+                <div class="nutr-leg-row">
+                    <span class="nutr-leg-dot" style="background:${s.color}"></span>
+                    <span class="nutr-leg-icon">${s.icon}</span>
+                    <span class="nutr-leg-name">${s.cat}</span>
+                    <span class="nutr-leg-pct">${s.pct}%</span>
+                </div>`).join('')}
+            </div>
+        </div>
+
+        <!-- Score bar row -->
+        <div class="nutr-scores">
+            ${_nutrScoreBar('🌿 Salute', healthScore, '#4ade80')}
+            ${_nutrScoreBar('🎨 Varietà', varietyScore, '#60a5fa')}
+            ${_nutrScoreBar('❄️ Freschi', fresh_pct, '#22d3ee')}
+        </div>
+
+        <div class="aw-source">Basato su ${total} prodotti in dispensa · EverShelf</div>
+    </div>`;
+
+    // Trigger pie animation after render
+    requestAnimationFrame(() => {
+        const pie = document.getElementById('nutr-pie');
+        if (pie) setTimeout(() => pie.classList.add('nutr-pie-ready'), 60);
+    });
+}
+
+function _nutrScoreBar(label, val, color) {
+    return `<div class="nutr-score-row">
+        <span class="nutr-score-label">${label}</span>
+        <div class="nutr-score-track">
+            <div class="nutr-score-fill" style="width:0%;background:${color}" data-target="${val}"></div>
+        </div>
+        <span class="nutr-score-val">${val}%</span>
+    </div>`;
+}
+
+/**
+ * Start the waste ↔ nutrition alternation on the dashboard.
+ * One is shown, the other hidden; they swap every hour (+ random phase offset).
+ */
+let _insightPhase = null; // 'waste' | 'nutrition'
+
+function _startInsightAlternation(inventory) {
+    clearInterval(_insightFlipTimer);
+    // Pick initial panel based on current minute: even hour → waste, odd → nutrition
+    const isNutritionTurn = Math.floor(Date.now() / 3_600_000) % 2 === 1;
+    _insightPhase = isNutritionTurn ? 'nutrition' : 'waste';
+    _applyInsightPhase();
+    // Flip every hour
+    _insightFlipTimer = setInterval(() => {
+        _insightPhase = _insightPhase === 'waste' ? 'nutrition' : 'waste';
+        _applyInsightPhase();
+    }, 3_600_000);
+}
+
+function _applyInsightPhase() {
+    const wasteEl = document.getElementById('waste-chart-section');
+    const nutrEl  = document.getElementById('nutrition-section');
+    if (!wasteEl || !nutrEl) return;
+    const showNutr = _insightPhase === 'nutrition' && nutrEl.innerHTML.trim() !== '';
+    const showWaste = _insightPhase === 'waste'    && wasteEl.innerHTML.trim() !== '';
+    // Fade-swap
+    [wasteEl, nutrEl].forEach(el => { el.style.opacity = '0'; el.style.transition = 'opacity .6s'; });
+    setTimeout(() => {
+        wasteEl.style.display = showWaste ? 'block' : 'none';
+        nutrEl.style.display  = showNutr  ? 'block' : 'none';
+        // If neither ready yet, keep waste visible
+        if (!showWaste && !showNutr) wasteEl.style.display = 'block';
+        requestAnimationFrame(() => {
+            wasteEl.style.opacity = '1';
+            nutrEl.style.opacity  = '1';
+            // Animate score bars when nutrition becomes visible
+            if (showNutr) {
+                nutrEl.querySelectorAll('.nutr-score-fill').forEach(bar => {
+                    bar.style.width = (bar.dataset.target || 0) + '%';
+                });
+            }
+        });
+    }, 620);
+}
+
 // ===== DASHBOARD =====
 async function loadDashboard() {
     try {
@@ -2884,6 +3083,13 @@ async function loadDashboard() {
             navigator.onLine
         );
         _startAntiWasteAutoRefresh();
+
+        // Nutrition section — built from the full inventory list
+        try {
+            const invForNutr = (await api('inventory_list')).inventory || [];
+            _renderNutritionSection(invForNutr);
+        } catch(_e) {}
+        _startInsightAlternation();
 
         // Opened (partially used products with known package capacity)
         const openedSection = document.getElementById('alert-opened');
@@ -11388,10 +11594,9 @@ function activateScreensaver() {
     requestAnimationFrame(() => overlay.classList.add('visible'));
     updateScreensaverClock();
     _screensaverClockInterval = setInterval(updateScreensaverClock, 1000);
-    // Load data and start facts
+    // Load data and start fact/nutrition rotation
     loadScreensaverData().then(() => {
-        showNextScreensaverFact();
-        _screensaverFactInterval = setInterval(showNextScreensaverFact, SCREENSAVER_FACT_DURATION);
+        _startScreensaverRotation();
     });
 }
 
@@ -11427,6 +11632,11 @@ function dismissScreensaver(targetPage) {
     if (!_screensaverActive) return;
     clearInterval(_screensaverClockInterval);
     clearInterval(_screensaverFactInterval);
+    clearInterval(_ssRotationTimer);
+    const nutrEl = document.getElementById('screensaver-nutrition');
+    if (nutrEl) { nutrEl.style.display = 'none'; nutrEl.innerHTML = ''; }
+    const factEl = document.getElementById('screensaver-fact');
+    if (factEl) { factEl.classList.remove('visible'); }
     const overlay = document.getElementById('screensaver');
     overlay.classList.remove('visible');
     setTimeout(() => {
@@ -11440,6 +11650,121 @@ function dismissScreensaver(targetPage) {
         }
         resetInactivityTimer();
     }, 400);
+}
+
+// Handle for screensaver rotation timer
+let _ssRotationTimer = null;
+let _ssSlot = 0; // 0=fact, 1=nutrition, 2=fact, 3=nutrition …
+
+/**
+ * Start the screensaver content rotation:
+ * Every SCREENSAVER_FACT_DURATION ms flip between fact text and nutrition charts.
+ */
+function _startScreensaverRotation() {
+    clearInterval(_ssRotationTimer);
+    _ssSlot = 0;
+    _showScreensaverSlot(0);
+    _screensaverFactInterval = _ssRotationTimer = setInterval(() => {
+        _ssSlot = (_ssSlot + 1) % 4; // 4 steps: fact, nutr, fact, nutr (with repeats for more facts)
+        _showScreensaverSlot(_ssSlot);
+    }, SCREENSAVER_FACT_DURATION);
+}
+
+function _showScreensaverSlot(slot) {
+    const factEl  = document.getElementById('screensaver-fact');
+    const nutrEl  = document.getElementById('screensaver-nutrition');
+    if (!factEl || !nutrEl) return;
+    const showNutr = slot % 2 === 1; // odd slots = nutrition
+    // Fade out both
+    factEl.classList.remove('visible');
+    nutrEl.style.opacity = '0';
+    nutrEl.style.transition = 'opacity 1.5s ease';
+    setTimeout(() => {
+        if (!_screensaverActive) return;
+        if (showNutr) {
+            factEl.style.display = 'none';
+            nutrEl.style.display = 'flex';
+            _renderScreensaverNutrition();
+            requestAnimationFrame(() => { nutrEl.style.opacity = '1'; });
+        } else {
+            nutrEl.style.display = 'none';
+            factEl.style.display = '';
+            factEl.textContent = generateScreensaverFact();
+            requestAnimationFrame(() => { factEl.classList.add('visible'); });
+        }
+    }, 1600);
+}
+
+/**
+ * Render animated 3D-style pie charts inside the screensaver.
+ * Shows: category distribution, health score, freshness.
+ */
+function _renderScreensaverNutrition() {
+    const el = document.getElementById('screensaver-nutrition');
+    if (!el) return;
+    // Use cached nutrition data from dashboard if available, else build from screensaver inventory
+    const inv = (_screensaverData && _screensaverData.inventory) || [];
+    const data = (_nutriData && _nutriData.slices) ? _nutriData : _buildNutritionData(inv);
+    if (!data) { el.style.display = 'none'; return; }
+
+    const { slices, total, healthScore, varietyScore, freshnessScore, fresh_pct } = data;
+    const top4 = slices.slice(0, 4);
+
+    // Build conic-gradient
+    let deg = 0;
+    const stops = top4.map(s => {
+        const end = deg + s.pct * 3.6;
+        const stop = `${s.color} ${deg.toFixed(1)}deg ${end.toFixed(1)}deg`;
+        deg = end;
+        return stop;
+    });
+    if (deg < 360) stops.push(`rgba(255,255,255,0.08) ${deg.toFixed(1)}deg 360deg`);
+    const gradient = `conic-gradient(from 0deg, ${stops.join(', ')})`;
+
+    // Three mini donut charts: categories, health, freshness
+    const healthColor = healthScore >= 70 ? '#4ade80' : healthScore >= 45 ? '#fbbf24' : '#f87171';
+    const freshColor  = freshnessScore >= 70 ? '#22d3ee' : freshnessScore >= 40 ? '#60a5fa' : '#94a3b8';
+    const varColor    = varietyScore   >= 70 ? '#a78bfa' : varietyScore   >= 40 ? '#fbbf24' : '#64748b';
+
+    el.innerHTML = `
+    <div class="ss-nutr-wrap">
+        <div class="ss-nutr-title">🥗 La tua dispensa oggi</div>
+        <div class="ss-nutr-charts">
+            <!-- Main category pie -->
+            <div class="ss-nutr-chart-block">
+                <div class="ss-pie3d" id="ss-pie-main" style="--pie-bg:${gradient}"></div>
+                <div class="ss-nutr-chart-label">${total} prodotti</div>
+                <div class="ss-nutr-legend">
+                    ${top4.map(s => `<div class="ss-leg-row"><span style="background:${s.color}" class="ss-leg-dot"></span><span>${s.icon} ${s.cat}</span><span class="ss-leg-pct">${s.pct}%</span></div>`).join('')}
+                </div>
+            </div>
+            <!-- Score donuts -->
+            <div class="ss-nutr-scores-col">
+                ${_ssDonut('❤️ Salute', healthScore, healthColor)}
+                ${_ssDonut('🎨 Varietà', varietyScore, varColor)}
+                ${_ssDonut('❄️ Freschi', fresh_pct, freshColor)}
+            </div>
+        </div>
+    </div>`;
+
+    // Trigger animations
+    requestAnimationFrame(() => {
+        const pie = document.getElementById('ss-pie-main');
+        if (pie) setTimeout(() => pie.classList.add('ss-pie3d-ready'), 80);
+        el.querySelectorAll('.ss-donut-ring').forEach(ring => {
+            const val = parseInt(ring.dataset.val || 0);
+            setTimeout(() => { ring.style.setProperty('--val', val); ring.classList.add('ss-donut-ready'); }, 200);
+        });
+    });
+}
+
+function _ssDonut(label, val, color) {
+    return `<div class="ss-donut-wrap">
+        <div class="ss-donut-ring" data-val="${val}" style="--color:${color};--val:0">
+            <span class="ss-donut-text">${val}%</span>
+        </div>
+        <div class="ss-donut-label">${label}</div>
+    </div>`;
 }
 
 // Load all data needed for screensaver facts
@@ -11699,49 +12024,40 @@ function generateScreensaverFact() {
     }
 
     // --- Time-of-day greetings & suggestions ---
-    facts.push(() => `${greeting}! Se vuoi che ti preparo una ricetta, tocca qui.`);
-    facts.push(() => `${greeting}! La tua dispensa è sotto controllo. 😊`);
     if (hour >= 6 && hour < 10) {
-        facts.push(() => `Buongiorno! Pronto per la colazione? ☕`);
         if (byCategory['pane']) facts.push(() => `Buongiorno! Hai del pane per la colazione. 🍞`);
         if (byCategory['latticini']) facts.push(() => `C'è del latte in frigo per il cappuccino? ☕🥛`);
+        if (byCategory['frutta']) facts.push(() => `Buongiorno! Una bella frutta fresca per iniziare bene. 🍎`);
     }
     if (hour >= 11 && hour < 14) {
-        facts.push(() => `È quasi ora di pranzo! Cosa cuciniamo? 🍽️`);
         if (byCategory['pasta']) facts.push(() => `Ora di pranzo… Un bel piatto di pasta? 🍝`);
+        if (byCategory['verdura']) facts.push(() => `Un'insalata fresca per pranzo? Hai ${byCategory['verdura'].length} verdure! 🥗`);
     }
     if (hour >= 17 && hour < 21) {
-        facts.push(() => `Buona sera! Hai pensato alla cena? 🍽️`);
         if (byCategory['carne']) facts.push(() => `Per cena potresti usare la carne che hai. 🥩`);
         if (byCategory['pesce']) facts.push(() => `Che ne dici di pesce per cena? 🐟`);
+        if (expiringThisWeek.length > 0) facts.push(() => `Hai ${expiringThisWeek.length} prodotti in scadenza questa settimana — usali stasera!`);
     }
     if (hour >= 21 || hour < 6) {
-        facts.push(() => `Buonanotte! Domani controlla le scadenze. 🌙`);
+        if (expiringSoon.length > 0) facts.push(() => `Buonanotte! Domani ricordati di usare: ${expiringSoon.slice(0,2).map(i=>i.name).join(', ')}.`);
     }
 
     // --- Weekly stats ---
     const recentIn = stats.recent_in || 0;
     const recentOut = stats.recent_out || 0;
-    if (recentIn > 0) {
-        facts.push(() => `Questa settimana hai aggiunto ${recentIn} prodotti.`);
-    }
-    if (recentOut > 0) {
-        facts.push(() => `Questa settimana hai consumato ${recentOut} prodotti.`);
-    }
     if (recentIn > 0 && recentOut > 0) {
-        facts.push(() => `Bilancio settimanale: +${recentIn} entrati, -${recentOut} usciti.`);
+        facts.push(() => `Bilancio settimana: +${recentIn} aggiunti, −${recentOut} consumati.`);
+    } else if (recentIn > 0) {
+        facts.push(() => `Questa settimana hai aggiunto ${recentIn} prodotti.`);
+    } else if (recentOut > 0) {
+        facts.push(() => `Questa settimana hai consumato ${recentOut} prodotti. Ottimo!`);
     }
 
     // --- Tips & curiosità (statici ma ruotano) ---
-    facts.push(() => `💡 Lo sapevi? I prodotti in freezer durano molto più a lungo della data di scadenza.`);
+    facts.push(() => `💡 I prodotti in freezer durano molto più a lungo della data di scadenza.`);
     facts.push(() => `💡 Il pane congelato mantiene la fragranza per settimane.`);
-    facts.push(() => `💡 Le uova si conservano fino a 3-4 settimane dopo la data preferita.`);
-    facts.push(() => `💡 Lo yogurt chiuso in frigo dura spesso 1-2 settimane oltre la scadenza.`);
-    facts.push(() => `💡 Per evitare sprechi, usa prima i prodotti con scadenza più vicina.`);
+    facts.push(() => `💡 Per evitare sprechi, usa prima i prodotti con scadenza più vicina (FIFO).`);
     facts.push(() => `💡 La carne in freezer può durare fino a 6 mesi senza problemi.`);
-    facts.push(() => `💡 Le verdure fresche durano di più se conservate nel cassetto del frigo.`);
-    facts.push(() => `💡 Controlla regolarmente la dispensa per evitare doppioni nella spesa.`);
-    facts.push(() => `💡 I latticini vanno conservati nella parte più fredda del frigo.`);
     facts.push(() => `💡 Non ricongelare mai un alimento già scongelato. Cucinalo subito!`);
     facts.push(() => `💡 Un frigo ordinato ti fa risparmiare tempo e denaro.`);
     facts.push(() => `💡 Le conserve aperte vanno in frigo e consumate in pochi giorni.`);

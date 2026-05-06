@@ -5631,6 +5631,248 @@ body.cooking-mode-active .app-header {
     transform: scale(0.92);
 }
 
+/* ── Screensaver nutrition panel ── */
+.screensaver-nutrition {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    max-width: 90vw;
+    pointer-events: none;
+    user-select: none;
+}
+.ss-nutr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+.ss-nutr-title {
+    color: rgba(255,255,255,0.75);
+    font-size: 1.3rem;
+    font-weight: 300;
+    letter-spacing: 1px;
+    text-align: center;
+}
+.ss-nutr-charts {
+    display: flex;
+    align-items: flex-start;
+    gap: 36px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.ss-nutr-chart-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+.ss-nutr-chart-label {
+    color: rgba(255,255,255,0.5);
+    font-size: .85rem;
+    text-align: center;
+}
+/* 3D animated pie */
+.ss-pie3d {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: var(--pie-bg, conic-gradient(#4ade80 0deg 90deg, #60a5fa 90deg 180deg, #fbbf24 180deg 270deg, #334155 270deg 360deg));
+    transform: perspective(250px) rotateX(40deg) scale(0.82);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.6), 0 4px 0 rgba(255,255,255,0.06);
+    transition: transform 0.8s cubic-bezier(.34,1.56,.64,1), box-shadow 0.8s;
+    will-change: transform;
+}
+.ss-pie3d.ss-pie3d-ready {
+    transform: perspective(250px) rotateX(30deg) scale(1);
+    animation: ss-pie-spin 18s linear infinite;
+}
+@keyframes ss-pie-spin {
+    from { transform: perspective(250px) rotateX(30deg) rotate(0deg) scale(1); }
+    to   { transform: perspective(250px) rotateX(30deg) rotate(360deg) scale(1); }
+}
+.ss-nutr-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 130px;
+}
+.ss-leg-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255,255,255,0.65);
+    font-size: .8rem;
+}
+.ss-leg-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.ss-leg-pct {
+    margin-left: auto;
+    color: rgba(255,255,255,0.45);
+}
+/* Score donut column */
+.ss-nutr-scores-col {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+}
+.ss-donut-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+.ss-donut-label {
+    color: rgba(255,255,255,0.45);
+    font-size: .75rem;
+}
+/* CSS-only ring donut using conic-gradient */
+.ss-donut-ring {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: conic-gradient(var(--color, #4ade80) calc(var(--val, 0) * 1%), rgba(255,255,255,0.08) calc(var(--val, 0) * 1%));
+    transform: perspective(120px) rotateX(30deg) scale(0.7);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+    transition: transform 0.7s cubic-bezier(.34,1.56,.64,1), background 0.9s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ss-donut-ring.ss-donut-ready {
+    transform: perspective(120px) rotateX(25deg) scale(1);
+    animation: ss-donut-bob 4s ease-in-out infinite;
+}
+@keyframes ss-donut-bob {
+    0%,100% { transform: perspective(120px) rotateX(25deg) scale(1) translateY(0); }
+    50%      { transform: perspective(120px) rotateX(25deg) scale(1) translateY(-4px); }
+}
+.ss-donut-ring::after {
+    content: '';
+    position: absolute;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #0a0a0a;
+}
+.ss-donut-text {
+    position: relative;
+    z-index: 1;
+    color: rgba(255,255,255,0.8);
+    font-size: .8rem;
+    font-weight: 600;
+}
+
+/* ── Dashboard nutrition card ── */
+.nutr-card {
+    background: var(--bg-card, #fff);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+}
+.nutr-body {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin: 12px 0;
+}
+.nutr-pie-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+.nutr-pie-3d {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    transform: perspective(180px) rotateX(38deg) scale(0.82);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+    transition: transform 0.7s cubic-bezier(.34,1.56,.64,1);
+    will-change: transform;
+}
+.nutr-pie-3d.nutr-pie-ready {
+    transform: perspective(180px) rotateX(28deg) scale(1);
+    animation: nutr-pie-spin 22s linear infinite;
+}
+@keyframes nutr-pie-spin {
+    from { transform: perspective(180px) rotateX(28deg) rotate(0deg) scale(1); }
+    to   { transform: perspective(180px) rotateX(28deg) rotate(360deg) scale(1); }
+}
+.nutr-pie-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+.nutr-pie-total {
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.nutr-pie-label {
+    font-size: .6rem;
+    color: var(--text-secondary);
+}
+.nutr-legend {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.nutr-leg-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: .78rem;
+}
+.nutr-leg-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.nutr-leg-pct {
+    margin-left: auto;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+/* Score bars */
+.nutr-scores {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+.nutr-score-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .78rem;
+}
+.nutr-score-label { flex: 0 0 80px; white-space: nowrap; }
+.nutr-score-track {
+    flex: 1;
+    height: 7px;
+    border-radius: 4px;
+    background: rgba(0,0,0,0.07);
+    overflow: hidden;
+}
+.nutr-score-fill {
+    height: 100%;
+    border-radius: 4px;
+    width: 0%;
+    transition: width 1s ease;
+}
+.nutr-score-val { flex: 0 0 32px; text-align: right; font-weight: 600; }
+
 /* ===== SETUP WIZARD ===== */
 .setup-wizard-content {
     max-width: 480px;
