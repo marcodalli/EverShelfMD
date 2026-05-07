@@ -6731,7 +6731,7 @@ function getAllShoppingPrices(PDO $db): void {
                 $est = _calcEstimatedTotal($entry['price_per_unit'], $entry['unit_label'] ?? '', $qty, $unit, $defQty, $pkgUnit);
                 $prices[$name] = array_merge($entry, [
                     'estimated_total'       => $est,
-                    'estimated_total_label' => _formatPrice($est, $currency),
+                    'estimated_total_label' => $est !== null ? _formatPrice($est, $currency) : null,
                     'from_cache'            => true,
                 ]);
                 $total += $est ?? 0;
@@ -6773,7 +6773,7 @@ function getAllShoppingPrices(PDO $db): void {
                 $est = _calcEstimatedTotal($entry['price_per_unit'], $entry['unit_label'], $qty, $unit, $defQty, $pkgUnit);
                 $prices[$name] = array_merge($entry, [
                     'estimated_total'       => $est,
-                    'estimated_total_label' => _formatPrice($est, $currency),
+                    'estimated_total_label' => $est !== null ? _formatPrice($est, $currency) : null,
                     'from_cache'            => false,
                 ]);
                 $total += $est ?? 0;
@@ -6828,8 +6828,8 @@ function _calcEstimatedTotal(float $pricePerUnit, string $priceUnitLabel, float 
         } elseif ($unit === 'kg') {
             $weightKg = $qty;
         }
-        // pz / conf without defQty → we don't know the weight → no total
-        if ($weightKg <= 0) return null;
+        // pz / conf without defQty → assume 1 unit at price_per_unit (e.g. 1kg of fruit)
+        if ($weightKg <= 0) return round($pricePerUnit, 2);
         return round($pricePerUnit * $weightKg, 2);
     }
 
@@ -6845,7 +6845,7 @@ function _calcEstimatedTotal(float $pricePerUnit, string $priceUnitLabel, float 
         } elseif ($unit === 'l') {
             $volumeL = $qty;
         }
-        if ($volumeL <= 0) return null;
+        if ($volumeL <= 0) return round($pricePerUnit, 2);
         return round($pricePerUnit * $volumeL, 2);
     }
 
