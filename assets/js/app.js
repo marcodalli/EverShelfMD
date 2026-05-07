@@ -9977,10 +9977,29 @@ async function renderShoppingItems() {
         document.getElementById('btn-fetch-prices').style.display = 'inline-flex';
         // Allow a new fetch (re-render may have happened while old fetch was running)
         _pricesFetching = false;
-        // Immediately apply any prices already fetched this session — no flicker, no loading bar
-        _applyPriceBadgesFromCache();
-        // Fetch only items not yet priced (or all if none are cached yet)
-        fetchAllPrices(false);
+        // Check if ALL items are already cached with matching qty/unit
+        const _pItems = _buildPricePayload();
+        const _allCached = _pItems.length > 0 && _pItems.every(item => {
+            const e = _cachedPrices[item.name];
+            return e && e._qty === item.quantity && e._unit === item.unit && e.estimated_total != null;
+        });
+        if (_allCached) {
+            // Prices are fully fresh — apply instantly, no loading state
+            const { total: ct, count: cc } = _applyPriceBadgesFromCache();
+            const sym = _currencySymbol(s2.price_currency || 'EUR');
+            const totalEl = document.getElementById('price-total-value');
+            if (totalEl && cc > 0) totalEl.textContent = `ca. ${sym}${ct.toFixed(2)}`;
+            const fetchBtn2 = document.getElementById('btn-fetch-prices');
+            const refreshBtn2 = document.getElementById('btn-price-refresh');
+            if (fetchBtn2) fetchBtn2.disabled = false;
+            if (refreshBtn2) { refreshBtn2.disabled = false; refreshBtn2.textContent = '🔄'; }
+            _updateDashboardPriceTotal();
+        } else {
+            // Immediately apply any prices already fetched this session — no flicker for cached items
+            _applyPriceBadgesFromCache();
+            // Fetch only items not yet priced (or stale)
+            fetchAllPrices(false);
+        }
     } else {
         document.getElementById('shopping-price-bar').style.display = 'none';
         document.getElementById('btn-fetch-prices').style.display = 'none';
@@ -13400,7 +13419,7 @@ async function _initApp() {
         if (!_screensaverActive) refreshCurrentPage();
     }, 5 * 60 * 1000);
 
-    // 2) Ogni 2 min: aggiorna contatore lista spesa nel badge dashboard
+    // 2) Ogni 2 min: aggiorna contatore lista spesa nel badge dashboard e prezzi in background
     setInterval(() => {
         if (_screensaverActive) return;
         if (_currentPageId === 'shopping') {
@@ -13408,6 +13427,11 @@ async function _initApp() {
             loadShoppingList();
         } else {
             loadShoppingCount();
+            // Fetch prices silently in background so dashboard stat stays fresh
+            const _s = getSettings();
+            if (_s.price_enabled && shoppingItems.length > 0 && !_pricesFetching) {
+                fetchAllPrices(false);
+            }
         }
     }, 2 * 60 * 1000);
 

@@ -2611,8 +2611,8 @@ body {
 }
 .stat-price-total {
     display: block;
-    font-size: 0.62rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
     color: #15803d;
     margin-top: 2px;
     white-space: nowrap;
