@@ -3206,6 +3206,8 @@ async function loadDashboard() {
         });
         // Load shopping list count from Bring!
         loadShoppingCount();
+        // Show last known price total immediately from sessionStorage (before next background fetch)
+        _updateDashboardPriceTotal();
         
         // Quick recipe button - show when there are expiring products
         const recipeBar = document.getElementById('quick-recipe-bar');
@@ -9233,19 +9235,33 @@ function _updateDashboardPriceTotal() {
     const el = document.getElementById('stat-price-total');
     if (!el) return;
     const s = getSettings();
-    if (!s.price_enabled || !shoppingItems.length) { el.style.display = 'none'; return; }
-    const sym = _currencySymbol(s.price_currency || 'EUR');
-    const items = _buildPricePayload();
-    let total = 0, count = 0;
-    for (const item of items) {
-        const e = _cachedPrices[item.name];
-        if (e && e._qty === item.quantity && e._unit === item.unit && e.estimated_total != null) {
-            total += e.estimated_total;
-            count++;
+    if (!s.price_enabled) { el.style.display = 'none'; return; }
+
+    // If shoppingItems are loaded, compute fresh total and persist it
+    if (shoppingItems.length > 0) {
+        const sym = _currencySymbol(s.price_currency || 'EUR');
+        const items = _buildPricePayload();
+        let total = 0, count = 0;
+        for (const item of items) {
+            const e = _cachedPrices[item.name];
+            if (e && e._qty === item.quantity && e._unit === item.unit && e.estimated_total != null) {
+                total += e.estimated_total;
+                count++;
+            }
+        }
+        if (count > 0) {
+            const text = `ca. ${sym}${total.toFixed(2)}`;
+            el.textContent = text;
+            el.style.display = '';
+            try { sessionStorage.setItem('_pricetotal', text); } catch { /* quota */ }
+            return;
         }
     }
-    if (count > 0) {
-        el.textContent = `ca. ${sym}${total.toFixed(2)}`;
+
+    // Fallback: restore last known total saved in sessionStorage (dashboard before visiting shopping tab)
+    const saved = sessionStorage.getItem('_pricetotal');
+    if (saved) {
+        el.textContent = saved;
         el.style.display = '';
     } else {
         el.style.display = 'none';
