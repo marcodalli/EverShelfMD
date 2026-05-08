@@ -23,16 +23,20 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.content.ComponentCallbacks2
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.annotation.RequiresApi
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -333,6 +337,40 @@ class KioskActivity : AppCompatActivity() {
                     )
                     view?.loadData(errorPageHtml(), "text/html", "UTF-8")
                 }
+            }
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?
+            ) {
+                val code = errorResponse?.statusCode ?: 0
+                val url  = request?.url?.toString() ?: ""
+                if (code >= 500) {
+                    ErrorReporter.reportMessage(
+                        type    = "webview-http-error",
+                        message = "Server returned HTTP $code",
+                        extra   = mapOf("url" to url, "status" to code,
+                                        "main_frame" to (request?.isForMainFrame == true))
+                    )
+                    if (request?.isForMainFrame == true) {
+                        view?.loadData(errorPageHtml(), "text/html", "UTF-8")
+                    }
+                }
+            }
+            @RequiresApi(Build.VERSION_CODES.O)
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                val crashed = detail?.didCrash() ?: true
+                val priority = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    detail?.rendererPriorityAtExit() ?: -1 else -1
+                ErrorReporter.reportMessage(
+                    type    = if (crashed) "renderer-crashed" else "renderer-killed-oom",
+                    message = "WebView renderer process ${if (crashed) "crashed" else "killed by system (OOM)"}",
+                    extra   = mapOf("priority" to priority),
+                    forceReport = true
+                )
+                // Give the reporter 600 ms to queue the POST, then restart the Activity cleanly
+                Handler(Looper.getMainLooper()).postDelayed({ recreate() }, 600)
+                return true // we handled it — do NOT let the system kill the Activity immediately
             }
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
@@ -969,6 +1007,35 @@ class KioskActivity : AppCompatActivity() {
             if (f != null && f.exists() && pkg.isNotEmpty()) {
                 Handler(Looper.getMainLooper()).postDelayed({ installWithPackageInstaller(f, pkg) }, 600)
             }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        ErrorReporter.reportMessage(
+            type    = "low-memory",
+            message = "Device reported onLowMemory — risk of OOM renderer kill"
+        )
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+            val label = when (level) {
+                ComponentCallbacks2.TRIM_MEMORY_MODERATE         -> "MODERATE"
+                ComponentCallbacks2.TRIM_MEMORY_COMPLETE         -> "COMPLETE"
+                ComponentCallbacks2.TRIM_MEMORY_BACKGROUND       -> "BACKGROUND"
+                ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN        -> "UI_HIDDEN"
+                ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE -> "RUNNING_MODERATE"
+                ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW      -> "RUNNING_LOW"
+                ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> "RUNNING_CRITICAL"
+                else -> "LEVEL_$level"
+            }
+            ErrorReporter.reportMessage(
+                type    = "trim-memory",
+                message = "System memory trim: $label (level $level)",
+                extra   = mapOf("level" to level, "label" to label)
+            )
         }
     }
 
