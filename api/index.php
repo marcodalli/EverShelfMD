@@ -2166,9 +2166,21 @@ function getConsumptionPredictions(PDO $db): void {
         // Flag if deviation > 30% and absolute diff > meaningful threshold
         $deviation = abs($actualQty - $expectedQty);
         $threshold = max($dailyRate * 3, 0.5); // at least 3 days worth or 0.5 units
+
+        // If expected = 0 and actual > 0, the model simply thinks the product
+        // should have been used up by now. This is NOT an anomaly — the user
+        // either restocked (not yet tracked) or consumed less than usual.
+        // Only flag "less" direction when expected = 0 (actual ran out faster).
+        if ($expectedQty <= 0 && $actualQty >= 0) continue;
+
         $pctDev = $expectedQty > 0 ? ($deviation / $expectedQty) : ($actualQty > 0 ? 1 : 0);
 
-        if ($pctDev > 0.30 && $deviation > $threshold) {
+        // "more than expected" is almost always a restock the model doesn't know about yet.
+        // Only flag it at very high deviation (>400%) to catch truly impossible values.
+        // "less than expected" is more actionable: user may have consumed without registering.
+        $flagThreshold = ($actualQty > $expectedQty) ? 4.0 : 0.30;
+
+        if ($pctDev > $flagThreshold && $deviation > $threshold) {
             $unit = $item['unit'];
             // Format expected/actual in human units
             if ($unit === 'conf' && $item['default_quantity'] > 0 && $item['package_unit']) {
