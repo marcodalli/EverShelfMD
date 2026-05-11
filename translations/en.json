@@ -142,6 +142,7 @@
     "wasted": "Wasted: {n} ({pct}%)",
     "more_opened": "and {n} more opened...",
     "banner_expired_detail": "{when} · you still have <strong>{qty}</strong>.",
+    "banner_opened_detail": "{when} in {location} · you still have <strong>{qty}</strong>.",
     "banner_explain_title": "Ask Gemini for an explanation",
     "banner_explain_btn": "Explain",
     "banner_analyzing": "🤖 Analyzing…"
@@ -693,6 +694,11 @@
     "expired_suffix": "— Expired!",
     "expired_suffix_ok": "— Expired (still ok)",
     "expired_suffix_warning": "— Expired (check first)",
+    "opened_ago_long": "Opened {n} days ago",
+    "opened_today_long": "Opened today",
+    "opened_suffix": "— Opened too long!",
+    "opened_suffix_ok": "— Opened (still ok)",
+    "opened_suffix_warning": "— Opened (check first)",
     "days_compact": "{n}d"
   },
   "status": {

@@ -3746,10 +3746,32 @@ function renderBannerItem() {
     if (entry.type === 'expired') {
         const item = entry.data;
         const qtyDisplay = formatQuantity(item.quantity, item.unit, item.default_quantity, item.package_unit);
-        const daysText = item.days_expired === 0
-            ? t('expiry.expired_today_long')
-            : t('expiry.expired_ago_long').replace('{n}', item.days_expired);
+        const isOpenedExpiry = !!item.opened_at;
         const safety = getExpiredSafety(item, item.days_expired);
+
+        let daysText, suffix;
+        if (isOpenedExpiry) {
+            const todayMs = new Date(); todayMs.setHours(0, 0, 0, 0);
+            const daysSinceOpened = Math.round((todayMs - new Date(item.opened_at)) / 86400000);
+            daysText = daysSinceOpened === 0
+                ? t('expiry.opened_today_long')
+                : t('expiry.opened_ago_long').replace('{n}', daysSinceOpened);
+            suffix = safety.level === 'ok'
+                ? t('expiry.opened_suffix_ok')
+                : safety.level === 'warning'
+                    ? t('expiry.opened_suffix_warning')
+                    : t('expiry.opened_suffix');
+        } else {
+            daysText = item.days_expired === 0
+                ? t('expiry.expired_today_long')
+                : t('expiry.expired_ago_long').replace('{n}', item.days_expired);
+            suffix = safety.level === 'ok'
+                ? t('expiry.expired_suffix_ok')
+                : safety.level === 'warning'
+                    ? t('expiry.expired_suffix_warning')
+                    : t('expiry.expired_suffix');
+        }
+
         if (safety.level === 'danger') {
             banner.className = 'alert-banner banner-expired banner-expired-danger';
             iconEl.textContent = '🚫';
@@ -3760,16 +3782,24 @@ function renderBannerItem() {
             banner.className = 'alert-banner banner-expired banner-expired-ok';
             iconEl.textContent = '✅';
         }
-        const expiredSuffix = safety.level === 'ok'
-            ? t('expiry.expired_suffix_ok')
-            : safety.level === 'warning'
-                ? t('expiry.expired_suffix_warning')
-                : t('expiry.expired_suffix');
-        titleEl.textContent = `${item.name}${item.brand ? ' (' + item.brand + ')' : ''} ${expiredSuffix}`;
-        const baseDetail = t('dashboard.banner_expired_detail').replace('{when}', daysText).replace('{qty}', qtyDisplay);
-        const locationTag = item.location ? ` · <strong>${escapeHtml(item.location)}</strong>` : '';
-        const expiryTag = item.expiry_date ? ` · scade il <strong>${escapeHtml(item.expiry_date)}</strong>` : '';
-        detailEl.innerHTML = `${baseDetail}${locationTag}${expiryTag} <span class="banner-safety-tip banner-safety-${safety.level}">${safety.icon} ${safety.tip}</span>`;
+        titleEl.textContent = `${item.name}${item.brand ? ' (' + item.brand + ')' : ''} ${suffix}`;
+
+        let baseDetail;
+        if (isOpenedExpiry) {
+            const locLabel = (LOCATIONS[item.location]
+                ? LOCATIONS[item.location].icon + ' ' + LOCATIONS[item.location].label
+                : (item.location || ''));
+            baseDetail = t('dashboard.banner_opened_detail')
+                .replace('{when}', daysText)
+                .replace('{location}', escapeHtml(locLabel))
+                .replace('{qty}', qtyDisplay);
+        } else {
+            baseDetail = t('dashboard.banner_expired_detail').replace('{when}', daysText).replace('{qty}', qtyDisplay);
+            const locationTag = item.location ? ` · <strong>${escapeHtml(item.location)}</strong>` : '';
+            const expiryTag = item.expiry_date ? ` · ${escapeHtml(item.expiry_date)}` : '';
+            baseDetail += locationTag + expiryTag;
+        }
+        detailEl.innerHTML = `${baseDetail} <span class="banner-safety-tip banner-safety-${safety.level}">${safety.icon} ${safety.tip}</span>`;
         let btns = '';
         if (safety.level !== 'danger') {
             btns += `<button class="btn-banner btn-banner-use" onclick="bannerQuickUse()">${t('dashboard.banner_expired_action_use')}</button>`;
