@@ -3941,7 +3941,7 @@ function editBannerNoExpiry() {
     const entry = _bannerQueue[_bannerIndex];
     if (!entry || entry.type !== 'no_expiry') return;
     _bannerEditPending = true;
-    openEditInventoryModal(entry.data.id);
+    editInventoryItem(entry.data.id);
 }
 
 function editBannerReview() {
