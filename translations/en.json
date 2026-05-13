@@ -100,6 +100,7 @@
     "banner_expired_today": "Expired today",
     "banner_expired_days": "Expired {days} days ago",
     "banner_expired_action_use": "Use anyway",
+    "banner_expired_action_finished": "I finished it!",
     "banner_expired_action_throw": "I threw it away",
     "banner_expired_action_edit": "Fix date",
     "banner_anomaly_action_edit": "Fix inventory",
@@ -256,6 +257,7 @@
     "opened_badge": "OPENED",
     "not_in_inventory": "⚠️ Product not in inventory.",
     "expiry_warning": "⚠️ Use first the one{loc} that expires on {date} — {when}!",
+    "expiry_warning_opened": "⚠️ The one{loc} has been open for {when} — use it first!",
     "throw_title": "🗑️ Discard Product",
     "throw_all": "🗑️ Discard ALL ({qty})",
     "throw_qty_label": "How much to discard?",
@@ -748,6 +750,7 @@
     "finished_to_bring": "🛒 Product finished → added to Bring!",
     "thrown_away": "🗑️ {name} thrown away!",
     "thrown_away_partial": "🗑️ Thrown away {qty} {unit} of {name}",
+    "finished_all": "📤 {name} finished!",
     "product_finished_confirmed": "✅ Removed — add it again when you restock",
     "appliance_added": "Appliance added",
     "item_added": "{name} added"

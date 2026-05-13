@@ -100,6 +100,7 @@
     "banner_expired_today": "Heute abgelaufen",
     "banner_expired_days": "Seit {days} Tagen abgelaufen",
     "banner_expired_action_use": "Trotzdem verwenden",
+    "banner_expired_action_finished": "Habe ich verbraucht!",
     "banner_expired_action_throw": "Habe ich weggeworfen",
     "banner_expired_action_edit": "Datum korrigieren",
     "banner_anomaly_action_edit": "Bestand korrigieren",
@@ -256,6 +257,7 @@
     "opened_badge": "GEOEFFNET",
     "not_in_inventory": "⚠️ Produkt nicht im Bestand.",
     "expiry_warning": "⚠️ Verwende zuerst die{loc}, die am {date} abläuft — {when}!",
+    "expiry_warning_opened": "⚠️ Die{loc} ist seit {when} geöffnet — zuerst verwenden!",
     "throw_title": "🗑️ Produkt entsorgen",
     "throw_all": "🗑️ ALLES entsorgen ({qty})",
     "throw_qty_label": "Wie viel wegwerfen?",
@@ -748,6 +750,7 @@
     "finished_to_bring": "🛒 Produkt aufgebraucht → zu Bring! hinzugefügt",
     "thrown_away": "🗑️ {name} weggeworfen!",
     "thrown_away_partial": "🗑️ {qty} {unit} von {name} weggeworfen",
+    "finished_all": "📤 {name} aufgebraucht!",
     "product_finished_confirmed": "✅ Entfernt — wieder hinzufügen, wenn du nachkaufst",
     "appliance_added": "Gerät hinzugefügt",
     "item_added": "{name} hinzugefügt"

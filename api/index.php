@@ -2497,7 +2497,7 @@ function prewarmShelfLifeCache(PDO $db, int $limit = 5): array {
  */
 function getOpenedShelfLifeDays(string $name, string $category, string $location, bool $vacuumSealed = false, bool $allowAI = true): int {
     $cacheFile = __DIR__ . '/../data/opened_shelf_cache.json';
-    $cacheKey  = md5(mb_strtolower($name) . '|' . mb_strtolower($location));
+    $cacheKey  = md5(mb_strtolower($name) . '|' . mb_strtolower($location) . '|v2');
 
     // Static in-memory cache: the file is read only ONCE per PHP request,
     // even when this function is called for many items in a loop (e.g. getStats).
@@ -3136,6 +3136,9 @@ function generateRecipe(PDO $db): void {
         if ($item['unit'] === 'conf' && !empty($item['package_unit']) && $item['default_quantity'] > 0) {
             $line .= " ({$item['default_quantity']}{$item['package_unit']}/conf)";
         }
+        if ($item['unit'] === 'pz') {
+            $line .= ' [usa PEZZI interi — qty_number in pz, non grammi]';
+        }
         // Add expiry info only for priority groups 1-4
         if ($group <= 4 && $item['expiry_date']) {
             if ($daysLeft < 0) {
@@ -3414,7 +3417,7 @@ REGOLE:
 {$mealPlanRule}1. PRIORITÀ: usa prima gli ingredienti scaduti/in scadenza (⚠️🔴🟠), poi quelli [APERTO], poi il resto.
 2. Usa SOLO ingredienti dalla lista + acqua/sale/pepe/olio (sempre disponibili).
 3. Quantità MASSIME per $persons persona/e (NON superare mai): pasta/riso asciutto 90g/pers, carne 180g/pers, pesce 200g/pers, legumi secchi 80g/pers (lessi 200g/pers), verdure contorno 200g/pers, formaggio 80g/pers, latte 200ml/pers, farina per dolci 200g/pers. Se un ingrediente rimasto è inferiore a questi limiti, usalo tutto.
-4. "qty_number": valore NUMERICO nella STESSA unità della dispensa (g/ml/pz/conf, MAI kg o litri). Per non-dispensa: 0.
+4. "qty_number": valore NUMERICO nella STESSA unità della dispensa (g/ml/pz/conf, MAI kg o litri). Per non-dispensa: 0. IMPORTANTE: per ingredienti con unità "pz" scrivi qty_number come numero di PEZZI (es. 2, non 200g).
 5. "name": usa ESATTAMENTE il nome dalla lista (il sistema lo usa per scalare l'inventario).
 6. Includi nella lista ingredienti TUTTI quelli citati nei passi (tranne acqua/sale/pepe/olio).
 7. Language rule: {$recipeLangName} only for all textual fields (`title`, `tags`, `expiry_note`, `ingredients.qty`, `steps`, `nutrition_note`). Keep `meal` unchanged.
@@ -3619,7 +3622,7 @@ PROMPT;
                                     $qtyNum = $recipeVal / 1000;
                                 } elseif ($recipeUnit === 'ml' && $invUnit === 'ml') {
                                     $qtyNum = $recipeVal;
-                                // g/ml → pz (approximate to nearest piece)
+                                // g/ml → pz/conf (approximate to nearest piece)
                                 } elseif ($invUnit === 'pz' || $invUnit === 'conf') {
                                     $defQty = (float)($bestMatch['default_quantity'] ?? 0);
                                     if ($defQty > 0) {
@@ -3627,8 +3630,22 @@ PROMPT;
                                         $qtyNum = $recipeVal / $defQty;
                                         $qtyNum = max(0.25, round($qtyNum * 4) / 4); // round to nearest quarter
                                     } else {
-                                        $qtyNum = max(1, round($recipeVal / 100)); // fallback heuristic
+                                        // No default_quantity: AI was told to use pieces but sent grams.
+                                        // If the original qty_number looks like a piece count (≤ invQty and ≤ 100)
+                                        // keep it; otherwise fall back to 1.
+                                        $origQtyNum = (float)($ing['qty_number'] ?? 0);
+                                        if ($origQtyNum >= 1 && $origQtyNum <= $invQty && $origQtyNum <= 100) {
+                                            $qtyNum = $origQtyNum; // already a plausible piece count
+                                        } else {
+                                            $qtyNum = 1; // safe minimum: 1 piece
+                                        }
                                     }
+                                }
+                            } elseif ($invUnit === 'pz' && !$recipeUnit) {
+                                // AI returned qty_number without a parseable unit string.
+                                // If qty_number looks like grams (>> available pz count), clamp to 1.
+                                if ($qtyNum > $invQty || $qtyNum > 100) {
+                                    $qtyNum = max(1, round($qtyNum / 100));
                                 }
                             }
                             
@@ -4061,6 +4078,8 @@ function generateRecipeStream(PDO $db): void {
         $line     = "- {$item['name']}: {$item['quantity']} {$item['unit']}";
         if ($item['unit'] === 'conf' && !empty($item['package_unit']) && $item['default_quantity'] > 0)
             $line .= " ({$item['default_quantity']}{$item['package_unit']}/conf)";
+        if ($item['unit'] === 'pz')
+            $line .= ' [usa PEZZI interi — qty_number in pz, non grammi]';
         // Annotazioni urgenza: solo gruppi 1-3 (riduce token per gruppi 4-6)
         if ($group <= 3 && $item['expiry_date']) {
             if ($daysLeft < 0)       $line .= ' ⚠️SCADUTO';
@@ -4274,7 +4293,7 @@ REGOLE:
 {$mealPlanRule}1. PRIORITÀ: usa prima gli ingredienti scaduti/in scadenza (⚠️🔴🟠), poi quelli [APERTO], poi il resto.
 2. Usa SOLO ingredienti dalla lista + acqua/sale/pepe/olio (sempre disponibili).
 3. Quantità MASSIME per $persons persona/e (NON superare mai): pasta/riso asciutto 90g/pers, carne 180g/pers, pesce 200g/pers, legumi secchi 80g/pers (lessi 200g/pers), verdure contorno 200g/pers, formaggio 80g/pers, latte 200ml/pers, farina per dolci 200g/pers. Se un ingrediente rimasto è inferiore a questi limiti, usalo tutto.
-4. "qty_number": valore NUMERICO nella STESSA unità della dispensa (g/ml/pz/conf, MAI kg o litri). Per non-dispensa: 0.
+4. "qty_number": valore NUMERICO nella STESSA unità della dispensa (g/ml/pz/conf, MAI kg o litri). Per non-dispensa: 0. IMPORTANTE: per ingredienti con unità "pz" scrivi qty_number come numero di PEZZI (es. 2, non 200g).
 5. "name": usa ESATTAMENTE il nome dalla lista (il sistema lo usa per scalare l'inventario).
 6. Includi nella lista ingredienti TUTTI quelli citati nei passi (tranne acqua/sale/pepe/olio).
 7. Language rule: {$recipeLangName} only for all textual fields (`title`, `tags`, `expiry_note`, `ingredients.qty`, `steps`, `nutrition_note`). Keep `meal` unchanged.

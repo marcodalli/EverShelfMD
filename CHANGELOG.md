@@ -5,6 +5,16 @@ All notable changes to EverShelf will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.12] - 2026-05-13
+
+### Fixed
+- **Banner "Usa prima" con data calcolata confusa** — `_renderUseExpiryHint` mostrava una data di scadenza *calcolata* (shelf life dopo apertura) anziché la data reale. Ora, se il prodotto ha `opened_at`, il banner mostra "Quella [nel frigo], aperta da X giorni — usala prima!" usando la nuova chiave `use.expiry_warning_opened`.
+- **"Usa TUTTO / Finito" nelle ricette cancellava la riga** — `submitRecipeUse(true)` inviava `use_all: true` all'API che eseguiva un `DELETE` diretto sulla riga di inventario senza conferma. La funzione ora calcola la quantità esatta dagli item disponibili (`_recipeUseContext.items`) e invia un normale `inventory_use` con quantità esplicita.
+- **Ricette: `qty_number` in grammi per prodotti `pz`** — Il prompt AI e la post-elaborazione PHP ora istruiscono Gemini a esprimere `qty_number` come pezzi interi per ingredienti con unità `pz` (Pan bauletto, fette biscottate, ecc.). La lista ingredienti nel prompt include `[usa PEZZI interi]` per ogni prodotto `pz`. Il fallback PHP per `pz` senza `default_quantity` non divide più per 100 (trattando grammi come pezzi), ma usa il `qty_number` restituito dall'AI se sembra un conteggio plausibile, altrimenti 1.
+
+### Added
+- **Traduzione `use.expiry_warning_opened`** — Nuova chiave in `it.json`, `en.json`, `de.json` con placeholder `{loc}` (posizione) e `{when}` (giorni dall'apertura).
+
 ## [1.7.11] - 2026-05-12
 
 ### Added
