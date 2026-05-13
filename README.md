@@ -25,11 +25,15 @@
 [![SQLite](https://img.shields.io/badge/SQLite-3-blue.svg)](https://www.sqlite.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](Dockerfile)
 [![i18n](https://img.shields.io/badge/i18n-IT%20%7C%20EN%20%7C%20DE-orange.svg)](translations/)
-[![Version](https://img.shields.io/badge/version-1.7.11-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.7.12-brightgreen.svg)](CHANGELOG.md)
 
 ---
 
-## 🌍 Recent Updates (v1.7.11)
+## 🌍 Recent Updates (v1.7.12)
+
+- **Banner aperto con indicazione posizione** — Nella sezione "Usa prima" il testo ora mostra "Quella nel frigo, aperta da X giorni" invece di una data di scadenza calcolata che poteva risultare confusa.
+- **Ricette: quantità in pezzi per prodotti pz** — Il prompt AI e la post-elaborazione PHP ora istruiscono Gemini a esprimere `qty_number` come pezzi interi (non grammi) per i prodotti con unità `pz` (es. Pan bauletto, fette biscottate). Il fallback PHP non divide più per 100 quando `default_quantity = 0`.
+- **Fix: "Usa TUTTO" nelle ricette non elimina più la riga** — Il pulsante "Usa TUTTO / Finito" nella modal di utilizzo ricette inviava `use_all: true` che causava un `DELETE` immediato senza conferma. Ora calcola la quantità esatta dagli item disponibili e fa un normale `inventory_use`.
 
 - **Scan page redesign** — La pagina di scansione è stata completamente ridisegnata: **2× zoom fisso** (hardware o CSS), **torcia** con feedback visivo, **flip fotocamera** (front/back), **3 tab input** (Barcode / Nome / AI), **prodotti recenti** (ultimi 6 in localStorage), **live code overlay** durante la scansione parziale, **confirm overlay** al successo, **angoli guida** nel viewport.
 - **AI Number OCR** — Dopo 4 secondi senza scansione compare il bottone "Leggi numeri con AI": Gemini analizza il frame video e restituisce le cifre del barcode anche quando lo scanner ottico non riesce a leggerlo.

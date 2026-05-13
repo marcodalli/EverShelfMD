@@ -1683,25 +1683,26 @@ function estimateOpenedExpiryDays(product, location) {
     if (/\b(pollo|tacchino|maiale|manzo|vitello|agnello)\b/.test(name)) return 2;
     if (/salmone|tonno\s+fresco|pesce(?!\s+in)/.test(name)) return 2;
     if (/\b(passata|pelati|polpa|sugo|salsa\s+di\s+pomodoro)\b/.test(name)) return 5;
-    if (/insalata|rucola|spinaci|lattuga|crescione|germogli/.test(name)) return 2;
+    if (/insalata|rucola|spinaci|lattuga|crescione|germogli/.test(name)) return 4;
     if (/\b(succo|spremuta)\b/.test(name)) return 3;
     if (/\b(birra|beer)\b/.test(name)) return 3;
     if (/\bvino\b/.test(name)) return 5;
     if (/tonno\s+in\s+scatola|tonno\s+rio|sgombro\s+in/.test(name)) return 4;
-    // Fruit opened/cut in fridge
-    if (/\bavocado\b/.test(name)) return 2;
-    if (/\b(banana|banane|fragola|lampone|pesca|albicocca|ciliegia|mango|papaya)\b/.test(name)) return 2;
-    if (/\b(mela|pera|nettarina|prugna|kiwi|ananas|uva|melone|anguria)\b/.test(name)) return 3;
-    if (/\b(arancia|mandarino|pompelmo|clementina|limone)\b/.test(name)) return 3;
-    // Vegetables opened/cut in fridge
-    if (/\b(zucchina|zucchine|melanzana|pomodor)\b/.test(name)) return 3;
-    if (/\b(peperone|peperoni)\b/.test(name)) return 3;
-    if (/\b(broccolo|broccoli|cavolfiore|cavolo)\b/.test(name)) return 3;
-    if (/\bsedano\b|\bfinocchio\b/.test(name)) return 3;
-    if (/\b(cipolla|cipolle|cipollotto|scalogno|porro)\b/.test(name)) return 4;
-    if (/\b(carota|carote)\b/.test(name)) return 5;
-    if (/\b(patata|patate|tubero)\b/.test(name)) return 3;
-    if (/\baglio\b/.test(name)) return 10;
+    // Fruit in fridge (opened pack, not necessarily cut)
+    if (/\bavocado\b/.test(name)) return 3;
+    if (/\b(fragola|fragole|lampone|lamponi|mirtillo|mirtilli|mora|more)\b/.test(name)) return 4;
+    if (/\b(banana|banane|pesca|pesche|albicocca|albicocche|ciliegia|ciliegie|mango|papaya)\b/.test(name)) return 4;
+    if (/\b(mela|mele|pera|pere|nettarina|prugna|kiwi|ananas|uva|melone|anguria)\b/.test(name)) return 5;
+    if (/\b(arancia|arance|mandarino|mandarini|pompelmo|clementina|limone|limoni)\b/.test(name)) return 7;
+    // Vegetables in fridge (opened pack)
+    if (/\b(zucchina|zucchine|melanzana|melanzane|pomodor)\b/.test(name)) return 5;
+    if (/\b(peperone|peperoni)\b/.test(name)) return 5;
+    if (/\b(broccolo|broccoli|cavolfiore|cavolo)\b/.test(name)) return 4;
+    if (/\bsedano\b|\bfinocchio\b/.test(name)) return 5;
+    if (/\b(cipolla|cipolle|cipollotto|scalogno|porro)\b/.test(name)) return 6;
+    if (/\b(carota|carote)\b/.test(name)) return 7;
+    if (/\b(patata|patate|tubero)\b/.test(name)) return 4;
+    if (/\baglio\b/.test(name)) return 14;
 
     // ── G: Fridge condiments ─────────────────────────────────────────────
     if (/maionese|mayo|mayon/.test(name)) return 90;
@@ -3949,10 +3950,11 @@ function renderBannerItem() {
         }
         detailEl.innerHTML = `${baseDetail} <span class="banner-safety-tip banner-safety-${safety.level}">${safety.icon} ${safety.tip}</span>`;
         let btns = '';
+        btns += `<button class="btn-banner btn-banner-finish" onclick="bannerFinishAll()">${t('dashboard.banner_expired_action_finished')}</button>`;
         if (safety.level !== 'danger') {
             btns += `<button class="btn-banner btn-banner-use" onclick="bannerQuickUse()">${t('dashboard.banner_expired_action_use')}</button>`;
         }
-        btns += `<button class="btn-banner btn-banner-throw${safety.level === 'danger' ? ' btn-banner-throw-primary' : ''}" onclick="bannerThrowAway()">${t('dashboard.banner_expired_action_throw')}</button>`;
+        btns += `<button class="btn-banner btn-banner-throw" onclick="bannerThrowAway()">${t('dashboard.banner_expired_action_throw')}</button>`;
         btns += `<button class="btn-banner btn-banner-edit" onclick="editBannerExpiry()">${t('dashboard.banner_expired_action_edit')}</button>`;
         if (safety.level === 'danger') {
             btns += `<button class="btn-banner btn-banner-use btn-banner-use-danger" onclick="bannerQuickUse()">${t('dashboard.banner_expired_action_use')}</button>`;
@@ -4258,7 +4260,7 @@ function bannerFinishAll() {
         location: '__all__',
     }).then(res => {
         if (res.success) {
-            showToast(`📤 ${item.name} terminato!`, 'success');
+            showToast(t('toast.finished_all').replace('{name}', item.name), 'success');
             showLowStockBringPrompt(res, () => loadDashboard());
         } else {
             showToast(res.error || 'Errore', 'error');
@@ -7479,7 +7481,17 @@ function _renderUseExpiryHint(items) {
         ? ` (${locInfo.icon} ${locInfo.label})`
         : '';
 
-    hintEl.innerHTML = t('use.expiry_warning').replace('{loc}', locLabel).replace('{date}', `<strong>${dateStr}</strong>`).replace('{when}', whenStr);
+    if (soonest.opened_at) {
+        // The soonest "expiry" is a calculated date from when the item was opened — show days-open instead
+        const todayBase = new Date(); todayBase.setHours(0, 0, 0, 0);
+        const openedDays = Math.round((todayBase - new Date(soonest.opened_at)) / 86400000);
+        const whenOpenedStr = openedDays <= 0
+            ? t('expiry.opened_today_long')
+            : t('expiry.opened_ago_long').replace('{n}', openedDays);
+        hintEl.innerHTML = t('use.expiry_warning_opened').replace('{loc}', locLabel).replace('{when}', whenOpenedStr);
+    } else {
+        hintEl.innerHTML = t('use.expiry_warning').replace('{loc}', locLabel).replace('{date}', `<strong>${dateStr}</strong>`).replace('{when}', whenStr);
+    }
     hintEl.style.display = 'block';
 }
 
@@ -11408,7 +11420,7 @@ function adjustRecipePersons(delta) {
     input.value = val;
 }
 
-let _recipeUseContext = null; // { idx, productId, btn, qtyNumber }
+let _recipeUseContext = null; // { idx, productId, btn, qtyNumber, items }
 let _recipeUseConfMode = null;
 let _recipeUseNormalUnit = 'pz';
 
@@ -11432,6 +11444,7 @@ async function useRecipeIngredient(idx, productId, location, qtyNumber, btn, rec
     try {
         const data = await api('inventory_list');
         const items = (data.inventory || []).filter(i => i.product_id == productId);
+        _recipeUseContext.items = items; // cache for "use all" quantity lookup
         
         if (items.length === 0) {
             showToast(t('error.not_in_inventory'), 'error');
@@ -11622,7 +11635,17 @@ async function submitRecipeUse(useAll) {
     
     let qty;
     if (useAll) {
-        qty = 0; // API handles use_all
+        // Use the exact available qty at the selected location — do NOT send use_all=true
+        // to the API, because that would permanently DELETE the inventory row without a
+        // confirmation step. Instead send the precise quantity so the row is set to qty=0
+        // and the normal "finished items" banner can handle the reconciliation.
+        const cachedItems = _recipeUseContext.items || [];
+        const locItems = cachedItems.filter(i => i.location === location && parseFloat(i.quantity) > 0);
+        qty = locItems.reduce((s, i) => s + parseFloat(i.quantity || 0), 0) || 0;
+        if (qty <= 0) {
+            // Nothing at this location — fallback to current input value
+            qty = parseFloat(document.getElementById('ruse-quantity').value) || 1;
+        }
     } else {
         qty = parseFloat(document.getElementById('ruse-quantity').value) || 1;
         if (_recipeUseConfMode && _recipeUseConfMode._activeUnit === 'sub') {
@@ -11639,7 +11662,6 @@ async function submitRecipeUse(useAll) {
         const result = await api('inventory_use', {}, 'POST', {
             product_id: productId,
             quantity: qty,
-            use_all: useAll,
             location: location,
             notes: recipeTitle ? `Ricetta: ${recipeTitle}` : '',
         });

@@ -379,25 +379,26 @@ function estimateOpenedExpiryDaysPHP(string $name, string $category, string $loc
     if (preg_match('/\b(pollo|tacchino|maiale|manzo|vitello|agnello)\b/', $n)) return 2;
     if (preg_match('/salmone|tonno\s+fresco|pesce(?!\s+in)/', $n)) return 2;
     if (preg_match('/\b(passata|pelati|polpa|sugo|salsa\s+di\s+pomodoro)\b/', $n)) return 5;
-    if (preg_match('/insalata|rucola|spinaci|lattuga|crescione|germogli/', $n)) return 2;
+    if (preg_match('/insalata|rucola|spinaci|lattuga|crescione|germogli/', $n)) return 4;
     if (preg_match('/\b(succo|spremuta)\b/', $n)) return 3;
     if (preg_match('/\b(birra|beer)\b/', $n)) return 3;
     if (preg_match('/\bvino\b/', $n)) return 5;
     if (preg_match('/tonno\s+in\s+scatola|tonno\s+rio|sgombro\s+in/', $n)) return 4;
-    // Fruit opened/cut in fridge — much shorter than sealed
-    if (preg_match('/\bavocado\b/', $n)) return 2;
-    if (preg_match('/\b(banana|banane|fragola|lampone|pesca|albicocca|ciliegia|mango|papaya)\b/', $n)) return 2;
-    if (preg_match('/\b(mela|pera|nettarina|prugna|kiwi|ananas|uva|melone|anguria)\b/', $n)) return 3;
-    if (preg_match('/\b(arancia|mandarino|pompelmo|clementina|limone)\b/', $n)) return 3; // cut citrus
-    // Vegetables opened/cut in fridge
-    if (preg_match('/\b(zucchina|zucchine|melanzana|pomodor)\b/', $n)) return 3;
-    if (preg_match('/\b(peperone|peperoni)\b/', $n)) return 3;
-    if (preg_match('/\b(broccolo|broccoli|cavolfiore|cavolo)\b/', $n)) return 3;
-    if (preg_match('/\bsedano\b|\bfinocchio\b/', $n)) return 3;
-    if (preg_match('/\b(cipolla|cipolle|cipollotto|scalogno|porro)\b/', $n)) return 4;
-    if (preg_match('/\b(carota|carote)\b/', $n)) return 5;
-    if (preg_match('/\b(patata|patate|tubero)\b/', $n)) return 3; // cooked/cut potato
-    if (preg_match('/\baglio\b/', $n)) return 10;
+    // Fruit in fridge (opened pack, not necessarily cut)
+    if (preg_match('/\bavocado\b/', $n)) return 3;
+    if (preg_match('/\b(fragola|fragole|lampone|lamponi|mirtillo|mirtilli|mora|more)\b/', $n)) return 4;
+    if (preg_match('/\b(banana|banane|pesca|pesche|albicocca|albicocche|ciliegia|ciliegie|mango|papaya)\b/', $n)) return 4;
+    if (preg_match('/\b(mela|mele|pera|pere|nettarina|prugna|kiwi|ananas|uva|melone|anguria)\b/', $n)) return 5;
+    if (preg_match('/\b(arancia|arance|mandarino|mandarini|pompelmo|clementina|limone|limoni)\b/', $n)) return 7;
+    // Vegetables in fridge (opened pack)
+    if (preg_match('/\b(zucchina|zucchine|melanzana|melanzane|pomodor)\b/', $n)) return 5;
+    if (preg_match('/\b(peperone|peperoni)\b/', $n)) return 5;
+    if (preg_match('/\b(broccolo|broccoli|cavolfiore|cavolo)\b/', $n)) return 4;
+    if (preg_match('/\bsedano\b|\bfinocchio\b/', $n)) return 5;
+    if (preg_match('/\b(cipolla|cipolle|cipollotto|scalogno|porro)\b/', $n)) return 6;
+    if (preg_match('/\b(carota|carote)\b/', $n)) return 7;
+    if (preg_match('/\b(patata|patate|tubero)\b/', $n)) return 4;
+    if (preg_match('/\baglio\b/', $n)) return 14;
 
     // ── G: Fridge condiments — medium shelf-life ─────────────────────────
     if (preg_match('/maionese|mayo|mayon/', $n)) return 90;

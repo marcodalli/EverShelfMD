@@ -100,6 +100,7 @@
     "banner_expired_today": "Scaduto oggi",
     "banner_expired_days": "Scaduto da {days} giorni",
     "banner_expired_action_use": "Usa comunque",
+    "banner_expired_action_finished": "L'ho finito!",
     "banner_expired_action_throw": "L'ho buttato",
     "banner_expired_action_edit": "Correggi data",
     "banner_anomaly_action_edit": "Correggi inventario",
@@ -256,6 +257,7 @@
     "opened_badge": "APERTO",
     "not_in_inventory": "⚠️ Prodotto non presente nell'inventario.",
     "expiry_warning": "⚠️ Usa prima quella{loc} che scade il {date} — {when}!",
+    "expiry_warning_opened": "⚠️ Quella{loc}, aperta da {when} — usala prima!",
     "throw_title": "🗑️ Butta Prodotto",
     "throw_all": "🗑️ Butta TUTTO ({qty})",
     "throw_qty_label": "Quanto butti?",
@@ -748,6 +750,7 @@
     "finished_to_bring": "🛒 Prodotto finito → aggiunto a Bring!",
     "thrown_away": "🗑️ {name} buttato!",
     "thrown_away_partial": "🗑️ Buttato {qty} {unit} di {name}",
+    "finished_all": "📤 {name} terminato!",
     "product_finished_confirmed": "✅ Rimosso — riaggiungi quando ne ricompri",
     "appliance_added": "Elettrodomestico aggiunto",
     "item_added": "{name} aggiunto"
