@@ -119,3 +119,63 @@ jobs:
 
           Triggered by: $LAST"
           git push origin main
+
+  # ── Auto-create GitHub Release on main ───────────────────────────────────
+  # Runs after auto-merge succeeds. Reads version from index.html,
+  # creates a release tag vX.Y.Z if it doesn't exist yet.
+  # This powers the in-app update badge for self-hosted users.
+  create-release:
+    name: Create GitHub Release
+    needs: [auto-merge-to-main]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from index.html
+        id: version
+        run: |
+          VER=$(grep -oP 'header-version">v\K[\d.]+' index.html | head -1)
+          echo "version=v${VER}" >> $GITHUB_OUTPUT
+          echo "Detected version: v${VER}"
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git ls-remote --tags origin "refs/tags/${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Read CHANGELOG entry for this version
+        id: changelog
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          BODY=$(awk "/^## \[?${VER#v}\]?|^## ${VER}/,/^## [0-9]/" CHANGELOG.md | head -50 | tail -n +1 | grep -v "^## [0-9]" || true)
+          if [ -z "$BODY" ]; then
+            BODY="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."
+          fi
+          # Multiline output
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "EverShelf ${{ steps.version.outputs.version }}"
+          body: ${{ steps.changelog.outputs.body }}
+          target_commitish: main
+          make_latest: true
