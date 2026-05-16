@@ -409,7 +409,7 @@ function estimateOpenedExpiryDaysPHP(string $name, string $category, string $loc
     if (preg_match('/\b(senape|mustard)\b/', $n)) return 90;
     if (preg_match('/salsa\s+di\s+soia|soy\s*sauce/', $n)) return 90;
     if (preg_match('/\b(tabasco|worcestershire|sriracha)\b/', $n)) return 180;
-    if (preg_match('/confettura|marmellata/', $n)) return 60;
+    if (preg_match('/confettura|marmellata/', $n)) return 180;
     if (preg_match('/nutella|cioccolat/', $n)) return 60;
 
     // ── H: Category fallbacks ────────────────────────────────────────────

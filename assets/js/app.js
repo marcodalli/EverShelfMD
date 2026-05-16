@@ -1704,7 +1704,7 @@ function estimateOpenedExpiryDays(product, location) {
     if (/\b(senape|mustard)\b/.test(name)) return 90;
     if (/salsa\s+di\s+soia|soy\s*sauce/.test(name)) return 90;
     if (/\b(tabasco|worcestershire|sriracha)\b/.test(name)) return 180;
-    if (/confettura|marmellata/.test(name)) return 60;
+    if (/confettura|marmellata/.test(name)) return 180;
     if (/nutella|cioccolat/.test(name)) return 60;
 
     // ── H: Category fallbacks ────────────────────────────────────────────
