@@ -11937,6 +11937,36 @@ async function confirmRecipeMove(productId, fromLoc, toLoc, openedId) {
     }
 }
 
+/**
+ * Extract tools/appliances from recipe steps text when tools_needed is absent (old cached recipes).
+ * Returns an array of localised tool names found in the steps.
+ */
+function _extractToolsFromSteps(steps) {
+    const text = (steps || []).join(' ').toLowerCase();
+    // Map: regex keyword → display name per language
+    const patterns = [
+        { re: /\bforn[oi]\b|oven|backofen/,            it: 'Forno',           en: 'Oven',              de: 'Backofen' },
+        { re: /\bmicroond[ea]\b|microwave|mikrowelle/,  it: 'Microonde',       en: 'Microwave',         de: 'Mikrowelle' },
+        { re: /\bfrullator[ei]\b|blender|mixer\b|pimer|frullatore a immersione|stabmixer/,
+                                                        it: 'Frullatore',      en: 'Blender',           de: 'Mixer' },
+        { re: /\bfritteuse\b|friggitrici[ae]\b|air\s*fry|friggitric[ae]\b|friggi\b/, it: 'Friggitrice', en: 'Air fryer', de: 'Fritteuse' },
+        { re: /\bpentola\s+a\s+pressione\b|pressure\s+cook|schnellkochtopf|cookeo|instant\s*pot/, it: 'Pentola a pressione', en: 'Pressure cooker', de: 'Schnellkochtopf' },
+        { re: /\bbimby\b|thermomix\b|monsieur\s+cuisine/,it: 'Bimby/Thermomix', en: 'Thermomix',        de: 'Thermomix' },
+        { re: /\bimpastatric[ae]\b|planetari[ao]\b|stand\s*mixer|knetmaschine/, it: 'Impastatrice', en: 'Stand mixer', de: 'Knetmaschine' },
+        { re: /\bvapore\b|steamer\b|dampfgarer\b/,      it: 'Vaporiera',       en: 'Steamer',           de: 'Dampfgarer' },
+        { re: /\bslow\s*cook|cottura\s+lenta\b|schongarer/, it: 'Slow cooker', en: 'Slow cooker',       de: 'Schongarer' },
+        { re: /\bgrill[eo]?\b|griglia\b|grillpfanne/,   it: 'Griglia',         en: 'Grill',             de: 'Grill' },
+        { re: /\bmacchina\s+del\s+pane\b|bread\s*machine|brotbackautomat/, it: 'Macchina del pane', en: 'Bread machine', de: 'Brotbackautomat' },
+        { re: /\bessiccator[ei]\b|dehydrator\b|dörrgerät/, it: 'Essiccatore',  en: 'Dehydrator',        de: 'Dörrgerät' },
+    ];
+    const lang = _currentLang || 'it';
+    const found = [];
+    for (const p of patterns) {
+        if (p.re.test(text)) found.push(p[lang] || p.it);
+    }
+    return found;
+}
+
 function renderRecipe(r) {
     let html = `<h2>${r.title}</h2>`;
 
@@ -11955,7 +11985,9 @@ function renderRecipe(r) {
     }
 
     // Tools/appliances banner (shown only when specific equipment is needed)
-    const tools = (r.tools_needed || []).filter(t => t && t.trim());
+    const tools = (r.tools_needed && r.tools_needed.length > 0)
+        ? r.tools_needed.filter(t => t && t.trim())
+        : _extractToolsFromSteps(r.steps);
     if (tools.length > 0) {
         html += `<div class="recipe-tools-banner">🔧 <strong>${t('recipes.tools_title')}:</strong> ${tools.map(t => `<span class="recipe-tool-chip">${t}</span>`).join('')}</div>`;
     }
@@ -12098,7 +12130,9 @@ function startCookingMode() {
     // Tools bar
     const toolsBar = document.getElementById('cooking-tools-bar');
     if (toolsBar) {
-        const tools = (_cookingRecipe.tools_needed || []).filter(t => t && t.trim());
+        const tools = (_cookingRecipe.tools_needed && _cookingRecipe.tools_needed.length > 0)
+            ? _cookingRecipe.tools_needed.filter(t => t && t.trim())
+            : _extractToolsFromSteps(_cookingRecipe.steps);
         if (tools.length > 0) {
             toolsBar.innerHTML = '🔧 ' + tools.map(t => `<span class="cooking-tool-chip">${t}</span>`).join('');
             toolsBar.style.display = '';
