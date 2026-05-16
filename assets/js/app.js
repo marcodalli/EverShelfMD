@@ -2079,6 +2079,75 @@ function _applySyncedSettings(serverSettings) {
     }
 }
 
+/**
+ * Populate the About section with the current app version from the server.
+ */
+async function _loadAboutSection() {
+    const el = document.getElementById('about-version-label');
+    if (!el) return;
+    try {
+        const res = await api('check_update');
+        const manifest = await fetch('manifest.json?_=' + Date.now()).then(r => r.json()).catch(() => ({}));
+        const local = manifest.version || '—';
+        const latest = res.latest_tag ? res.latest_tag.replace(/^v/, '') : null;
+        el.textContent = 'v' + local + (latest && latest !== local ? ' → v' + latest + ' available' : '');
+    } catch(e) {
+        el.textContent = '—';
+    }
+}
+
+/**
+ * Manually triggered bug report from the About section in Settings.
+ * Collects basic info and submits via the existing report_error endpoint.
+ */
+async function reportBugManual() {
+    const btn = document.getElementById('btn-report-bug');
+    const statusEl = document.getElementById('report-bug-status');
+    if (!btn || !statusEl) return;
+
+    btn.disabled = true;
+    statusEl.style.display = '';
+    statusEl.style.color = '#64748b';
+    statusEl.textContent = t('about.report_bug_sending');
+
+    const manifest = await fetch('manifest.json?_=' + Date.now()).then(r => r.json()).catch(() => ({}));
+
+    try {
+        const res = await fetch(API_BASE + '?action=report_error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source: 'pwa',
+                type: 'manual_report',
+                message: 'Manual bug report submitted from Settings → About',
+                stack: '',
+                url: location.href,
+                user_agent: navigator.userAgent,
+                version: manifest.version || '',
+                context: {
+                    lang: _currentLang,
+                    online: navigator.onLine,
+                    version_guard_bypass: true,
+                }
+            })
+        });
+        const json = await res.json();
+        if (json.ok) {
+            statusEl.style.color = '#15803d';
+            statusEl.textContent = t('about.report_bug_sent');
+            // Open GitHub issues so user can add details
+            setTimeout(() => window.open('https://github.com/dadaloop82/EverShelf/issues', '_blank', 'noopener'), 800);
+        } else {
+            throw new Error(json.error || 'error');
+        }
+    } catch(e) {
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = t('about.report_bug_error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 async function loadSettingsUI() {
     const s = getSettings();
     document.getElementById('setting-gemini-key').value = s.gemini_key || '';
@@ -2269,6 +2338,9 @@ async function loadSettingsUI() {
         const updatePanel = document.getElementById('kiosk-update-panel');
         if (updatePanel) updatePanel.style.display = '';
     }
+
+    // Populate About section version
+    _loadAboutSection();
 }
 
 // ── Kiosk: trigger native BLE scale reconfiguration wizard ────────────
@@ -11831,6 +11903,9 @@ function renderRecipe(r) {
     });
     html += '</ul>';
 
+    // Cooking mode action between ingredients and steps
+    html += `<button class="btn btn-large btn-cooking full-width mt-2" onclick="startCookingMode()">${t('recipes.start_cooking')}</button>`;
+
     // Steps
     html += `<h3>${t('recipes.steps_title')}</h3><ol>`;
     (r.steps || []).forEach(step => {
@@ -11852,6 +11927,62 @@ let _cookingRecipe = null;
 let _cookingStep = 0;
 let _cookingTTS = true;
 let _cookingVisited = new Set(); // indices of steps already seen
+let _cookingWheelBound = false;
+let _cookingWheelTouchStartY = null;
+let _cookingWheelLastNavTs = 0;
+let _cookingWheelLastDelta = 0;
+let _cookingWheelTiltResetTimer = null;
+
+function _layoutCookingWheelCards() {
+    const wheelEl = document.getElementById('cooking-wheel');
+    const centerEl = document.getElementById('cooking-step-text');
+    const prevEl = document.getElementById('cooking-step-prev');
+    const nextEl = document.getElementById('cooking-step-next');
+    if (!wheelEl || !centerEl || !prevEl || !nextEl) return;
+
+    const wheelH = wheelEl.clientHeight;
+    if (!wheelH) return;
+    const centerH = centerEl.offsetHeight;
+    const centerTop = Math.max(0, (wheelH - centerH) / 2);
+    const centerBottom = centerTop + centerH;
+    const pad = 8;
+    const gap = Math.max(10, Math.round(wheelH * 0.045));
+
+    const placeGhost = (el, isPrev) => {
+        el.style.bottom = 'auto';
+
+        if (el.classList.contains('is-empty')) {
+            el.style.maxHeight = '0px';
+            return;
+        }
+
+        // Measure natural height before clamping to available slot.
+        el.style.maxHeight = 'none';
+        const naturalH = Math.min(el.scrollHeight + 10, Math.round(wheelH * 0.42));
+
+        const available = isPrev
+            ? (centerTop - gap - pad)
+            : (wheelH - centerBottom - gap - pad);
+
+        if (available <= 20) {
+            el.style.maxHeight = '0px';
+            el.style.opacity = '0';
+            return;
+        }
+
+        const ghostH = Math.max(28, Math.min(naturalH, available));
+        el.style.maxHeight = `${Math.round(ghostH)}px`;
+        el.style.opacity = '';
+
+        const top = isPrev
+            ? Math.max(pad, centerTop - gap - ghostH)
+            : Math.min(wheelH - pad - ghostH, centerBottom + gap);
+        el.style.top = `${Math.round(top)}px`;
+    };
+
+    placeGhost(prevEl, true);
+    placeGhost(nextEl, false);
+}
 
 function startCookingMode() {
     const recipe = _cachedRecipe && _cachedRecipe.recipe ? _cachedRecipe.recipe : null;
@@ -11872,6 +12003,9 @@ function startCookingMode() {
     document.getElementById('cooking-tts-btn').textContent = '🔊';
     document.getElementById('cooking-overlay').style.display = 'flex';
     document.body.classList.add('cooking-mode-active');
+    _bindCookingWheelControls();
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (wheelEl) setTimeout(() => wheelEl.focus(), 20);
     try { screen.orientation?.lock('portrait').catch(() => {}); } catch (_) { /* ignore */ }
     renderCookingStep();
     if (_cookingTTS) {
@@ -11889,9 +12023,133 @@ function closeCookingMode() {
 
 function restartCookingMode() {
     _cookingStep = 0;
+    _cookingWheelLastDelta = 0;
     _cookingVisited = new Set();
     clearAllCookingTimers();
     renderCookingStep();
+}
+
+function _setCookingWheelTilt(clientX, clientY) {
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (!wheelEl) return;
+    const rect = wheelEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const nx = ((clientX - rect.left) / rect.width) - 0.5;
+    const ny = ((clientY - rect.top) / rect.height) - 0.5;
+    const tiltY = Math.max(-1, Math.min(1, nx)) * 7;
+    const tiltX = Math.max(-1, Math.min(1, -ny)) * 4;
+    const glow = 0.32 + (Math.min(1, Math.abs(nx) + Math.abs(ny)) * 0.45);
+
+    wheelEl.style.setProperty('--wheel-tilt-x', `${tiltX.toFixed(2)}deg`);
+    wheelEl.style.setProperty('--wheel-tilt-y', `${tiltY.toFixed(2)}deg`);
+    wheelEl.style.setProperty('--wheel-glow', glow.toFixed(2));
+}
+
+function _resetCookingWheelTilt() {
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (!wheelEl) return;
+    wheelEl.style.setProperty('--wheel-tilt-x', '0deg');
+    wheelEl.style.setProperty('--wheel-tilt-y', '0deg');
+    wheelEl.style.setProperty('--wheel-glow', '0.45');
+}
+
+function _pulseCookingWheel() {
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (!wheelEl) return;
+    wheelEl.classList.remove('snap');
+    void wheelEl.offsetWidth;
+    wheelEl.classList.add('snap');
+    setTimeout(() => wheelEl.classList.remove('snap'), 320);
+}
+
+function _cookingStepFeedback() {
+    _pulseCookingWheel();
+    if (navigator.vibrate) {
+        try { navigator.vibrate([10, 16, 10]); } catch (_) { /* ignore */ }
+    }
+}
+
+function _bindCookingWheelControls() {
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (!wheelEl || _cookingWheelBound) return;
+
+    wheelEl.addEventListener('wheel', (e) => {
+        if (!document.body.classList.contains('cooking-mode-active')) return;
+        if (Math.abs(e.deltaY) < 8) return;
+        e.preventDefault();
+        const now = Date.now();
+        if (now - _cookingWheelLastNavTs < 240) return;
+        _cookingWheelLastNavTs = now;
+        navigateCookingStep(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+
+    wheelEl.addEventListener('touchstart', (e) => {
+        const t = e.touches && e.touches[0] ? e.touches[0] : null;
+        _cookingWheelTouchStartY = t ? t.clientY : null;
+        if (t) _setCookingWheelTilt(t.clientX, t.clientY);
+    }, { passive: true });
+
+    wheelEl.addEventListener('touchmove', (e) => {
+        const t = e.touches && e.touches[0] ? e.touches[0] : null;
+        if (t) _setCookingWheelTilt(t.clientX, t.clientY);
+    }, { passive: true });
+
+    wheelEl.addEventListener('touchend', (e) => {
+        if (_cookingWheelTouchStartY === null) return;
+        const endY = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : _cookingWheelTouchStartY;
+        const delta = _cookingWheelTouchStartY - endY;
+        _cookingWheelTouchStartY = null;
+        if (Math.abs(delta) < 42) return;
+        const now = Date.now();
+        if (now - _cookingWheelLastNavTs < 240) return;
+        _cookingWheelLastNavTs = now;
+        navigateCookingStep(delta > 0 ? 1 : -1);
+        if (_cookingWheelTiltResetTimer) clearTimeout(_cookingWheelTiltResetTimer);
+        _cookingWheelTiltResetTimer = setTimeout(_resetCookingWheelTilt, 80);
+    }, { passive: true });
+
+    wheelEl.addEventListener('mousemove', (e) => {
+        if (!document.body.classList.contains('cooking-mode-active')) return;
+        _setCookingWheelTilt(e.clientX, e.clientY);
+    });
+
+    wheelEl.addEventListener('mouseleave', () => {
+        _resetCookingWheelTilt();
+    });
+
+    window.addEventListener('resize', () => {
+        if (!document.body.classList.contains('cooking-mode-active')) return;
+        _layoutCookingWheelCards();
+    });
+
+    wheelEl.addEventListener('keydown', (e) => {
+        if (!document.body.classList.contains('cooking-mode-active')) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            navigateCookingStep(1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            navigateCookingStep(-1);
+        }
+    });
+
+    _cookingWheelBound = true;
+}
+
+function _animateCookingWheelTransition() {
+    const wheelEl = document.getElementById('cooking-wheel');
+    if (!wheelEl) return;
+    wheelEl.classList.remove('turn-next', 'turn-prev');
+    if (_cookingWheelLastDelta === 0) return;
+
+    // Force style recalculation so repeated class toggles retrigger CSS animation.
+    void wheelEl.offsetWidth;
+    wheelEl.classList.add(_cookingWheelLastDelta > 0 ? 'turn-next' : 'turn-prev');
+
+    setTimeout(() => {
+        wheelEl.classList.remove('turn-next', 'turn-prev');
+    }, 380);
 }
 
 function renderCookingStep() {
@@ -11906,6 +12164,30 @@ function renderCookingStep() {
 
     document.getElementById('cooking-step-num').textContent = `${_cookingStep + 1} / ${total}`;
     document.getElementById('cooking-step-text').textContent = cleanStep;
+
+    const prevEl = document.getElementById('cooking-step-prev');
+    const nextEl = document.getElementById('cooking-step-next');
+    if (prevEl) {
+        if (_cookingStep > 0) {
+            prevEl.textContent = (steps[_cookingStep - 1] || '').replace(/^Passo\s*\d+\s*[:.]\s*/i, '');
+            prevEl.classList.remove('is-empty');
+        } else {
+            prevEl.textContent = '';
+            prevEl.classList.add('is-empty');
+        }
+    }
+    if (nextEl) {
+        if (_cookingStep < total - 1) {
+            nextEl.textContent = (steps[_cookingStep + 1] || '').replace(/^Passo\s*\d+\s*[:.]\s*/i, '');
+            nextEl.classList.remove('is-empty');
+        } else {
+            nextEl.textContent = '';
+            nextEl.classList.add('is-empty');
+        }
+    }
+    requestAnimationFrame(_layoutCookingWheelCards);
+    _animateCookingWheelTransition();
+    _cookingWheelLastDelta = 0;
 
     // Progress dots
     const dotsEl = document.getElementById('cooking-progress-dots');
@@ -12212,6 +12494,53 @@ let _cookingTimerIdCounter = 0;
 let _cookingSuggestedSeconds = 0;
 let _cookingSuggestedLabel = '';
 
+function _playCookingTimerSound(type = 'done') {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const now = ctx.currentTime;
+        const pattern = type === 'warning'
+            ? [{ f: 880, d: 0.08, o: 0.00 }, { f: 1046, d: 0.10, o: 0.14 }]
+            : [
+                { f: 740, d: 0.10, o: 0.00 },
+                { f: 988, d: 0.12, o: 0.18 },
+                { f: 1318, d: 0.14, o: 0.38 }
+            ];
+
+        for (const p of pattern) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = p.f;
+            gain.gain.setValueAtTime(0.0001, now + p.o);
+            gain.gain.exponentialRampToValueAtTime(0.12, now + p.o + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + p.o + p.d);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + p.o);
+            osc.stop(now + p.o + p.d + 0.02);
+        }
+
+        const endAt = now + Math.max(...pattern.map(p => p.o + p.d)) + 0.08;
+        setTimeout(() => { try { ctx.close(); } catch (_) { /* ignore */ } }, Math.max(120, Math.round((endAt - now) * 1000)));
+    } catch (_) { /* ignore */ }
+}
+
+function _notifyCookingTimer(type, label) {
+    const key = type === 'warning' ? 'cooking.timer_warning_tts' : 'cooking.timer_expired_tts';
+    const msg = t(key).replace('{label}', label || t('cooking.timer'));
+    const s = getSettings();
+    const hasBrowserTts = typeof window !== 'undefined' && 'speechSynthesis' in window;
+    const hasCustomTts = (s.tts_engine === 'custom' && !!s.tts_url);
+
+    if (_cookingTTS && (hasBrowserTts || hasCustomTts)) {
+        speakCookingStep(msg);
+    } else {
+        _playCookingTimerSound(type === 'warning' ? 'warning' : 'done');
+    }
+}
+
 /**
  * Parse time durations from step text.
  * Returns total seconds or 0 if no time found.
@@ -12245,18 +12574,88 @@ function _formatTimerDisplay(sec) {
 
 /** Extract a short 2-3 word label from the step text for the timer. */
 function _extractTimerLabel(text, stepNum) {
+    const raw = String(text || '');
     const fillers = new Set(['il','la','lo','le','gli','i','dell','della','dello','delle','degli','dei',
         'un','una','uno','del','al','alla','allo','alle','agli','ai','nel','nella','nello','nelle',
         'negli','nei','per','con','che','poi','e','o','non','se','in','di','a','da','fino','mentre',
-        'quando','dopo','prima','circa','bene','ancora','subito','su','ad','ed','più','meno','tutto','tutta']);
+        'quando','dopo','prima','circa','bene','ancora','subito','su','ad','ed','piu','meno','tutto','tutta',
+        'the','and','for','mit','und','zum','zur']);
+    const applianceWords = new Set(['moulinex','cookeo','bimby','forno','airfryer','friggitrice','microonde','tm5','tm6']);
     const timePatterns = [/mezz['']?\s*ora/i, /\bor[ae]\b/i, /\bmin(?:ut[oi])?\b/i, /\bsecond[oi]\b/i, /\bquarto\s+d['']?\s*ora/i];
-    let timeIdx = text.length;
-    for (const p of timePatterns) { const r = p.exec(text); if (r && r.index < timeIdx) timeIdx = r.index; }
-    const beforeTime = (text.slice(0, timeIdx).trim() || text);
-    const words = beforeTime.replace(/[.,!?;:'"()\[\]]/g, '').split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
-    const meaningful = words.filter(w => !fillers.has(w.toLowerCase()));
-    if (meaningful.length >= 1) return meaningful.slice(0, 3).join(' ');
-    return `Passo ${stepNum + 1}`;
+
+    let timeIdx = raw.length;
+    for (const p of timePatterns) {
+        const r = p.exec(raw);
+        if (r && r.index < timeIdx) timeIdx = r.index;
+    }
+
+    let beforeTime = (raw.slice(0, timeIdx).trim() || raw)
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[.,!?;:'"\[\]]/g, ' ')
+        .replace(/^\s*(poi|quindi|allora|infine|then|dann)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!beforeTime) return `Passo ${stepNum + 1}`;
+
+    const actionRules = [
+        { re: /\b(rosolatur\w*|rosola\w*|soffrigg\w*)\b/i, label: 'Rosolatura' },
+        { re: /\b(stuf\w*)\b/i, label: 'Stufare' },
+        { re: /\b(boll\w*|sobboll\w*)\b/i, label: 'Bollitura' },
+        { re: /\b(cuoc\w*|cottur\w*)\b/i, label: 'Cottura' },
+        { re: /\b(tost\w*)\b/i, label: 'Tostatura' },
+        { re: /\b(mescol\w*|mischi\w*)\b/i, label: 'Mescola' },
+        { re: /\b(ripos\w*)\b/i, label: 'Riposo' },
+        { re: /\b(marin\w*)\b/i, label: 'Marinatura' },
+        { re: /\b(preriscald\w*|accend\w*|scald\w*)\b/i, label: 'Preriscalda' }
+    ];
+
+    const hasAppliance = /\b(moulinex|cookeo|bimby|forno|airfryer|friggitrice|microonde|tm5|tm6)\b/i.test(beforeTime);
+    let actionLabel = '';
+    for (const rule of actionRules) {
+        if (rule.re.test(beforeTime)) {
+            actionLabel = rule.label;
+            break;
+        }
+    }
+
+    // Remove the leading verb chunk and appliance references, then keep only compact object words.
+    let objectPart = beforeTime
+        .replace(/^(?:fai|lascia|metti|porta|tieni|poi|quindi)\s+/i, '')
+        .replace(/^(?:rosola\w*|soffrigg\w*|stuf\w*|boll\w*|sobboll\w*|cuoc\w*|tost\w*|mescol\w*|mischi\w*|ripos\w*|marin\w*|preriscald\w*|accend\w*|scald\w*)\s+/i, '')
+        .replace(/\b(?:nel|nella|nello|nei|in|su|sul|sulla|dentro|con)\b\s+(?:il|lo|la|i|gli|le)?\s*(?:moulinex|cookeo|bimby|forno|airfryer|friggitrice|microonde|tm5|tm6)\b/gi, ' ')
+        .replace(/\b(moulinex|cookeo|bimby|forno|airfryer|friggitrice|microonde|tm5|tm6)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const objectWords = objectPart
+        .split(/\s+/)
+        .map(w => w.toLowerCase())
+        .filter(w => w.length > 2 && !/^\d+$/.test(w) && !fillers.has(w) && !applianceWords.has(w));
+
+    const shortObject = objectWords.slice(0, 2).join(' ');
+
+    let label = '';
+    if (actionLabel) {
+        label = shortObject ? `${actionLabel} ${shortObject}` : actionLabel;
+        if (actionLabel === 'Preriscalda' && hasAppliance) label = 'Preriscalda';
+    } else {
+        const fallback = beforeTime
+            .split(/\s+/)
+            .map(w => w.toLowerCase())
+            .filter(w => w.length > 2 && !/^\d+$/.test(w) && !fillers.has(w) && !applianceWords.has(w))
+            .slice(0, 3)
+            .join(' ');
+        label = fallback || `Passo ${stepNum + 1}`;
+    }
+
+    label = label.replace(/\s+/g, ' ').trim();
+    if (!label) return `Passo ${stepNum + 1}`;
+
+    // Keep timer chips compact and readable.
+    const maxLen = 30;
+    if (label.length > maxLen) label = label.slice(0, maxLen).trim() + '…';
+    return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function setupCookingTimerSuggestion(stepText) {
@@ -12290,28 +12689,34 @@ function addCookingTimer(seconds, label) {
 }
 
 function removeCookingTimer(id) {
-    const t = _cookingTimers.find(t => t.id === id);
-    if (t && t.interval) clearInterval(t.interval);
-    _cookingTimers = _cookingTimers.filter(t => t.id !== id);
+    const timer = _cookingTimers.find(ti => ti.id === id);
+    if (timer && timer.interval) clearInterval(timer.interval);
+    _cookingTimers = _cookingTimers.filter(ti => ti.id !== id);
     renderTimersBar();
     _updateScreenFlash();
 }
 
 function toggleCookingTimerById(id) {
-    const t = _cookingTimers.find(t => t.id === id);
-    if (!t) return;
-    if (t.running) {
-        clearInterval(t.interval);
-        t.interval = null;
-        t.running = false;
+    const timer = _cookingTimers.find(ti => ti.id === id);
+    if (!timer) return;
+    if (timer.running) {
+        clearInterval(timer.interval);
+        timer.interval = null;
+        timer.running = false;
     } else {
-        t.running = true;
-        t.interval = setInterval(() => {
-            t.seconds--;
-            if (t.seconds === 10 && _cookingTTS) {
-                speakCookingStep(t('cooking.timer_warning_tts').replace('{label}', t.label));
+        timer.running = true;
+        timer.interval = setInterval(() => {
+            timer.seconds = Math.max(0, timer.seconds - 1);
+
+            if (timer.seconds === 10) {
+                _notifyCookingTimer('warning', timer.label);
             }
-            if (t.seconds === 0) _cookingTimerDoneById(id);
+
+            if (timer.seconds === 0) {
+                _cookingTimerDoneById(id);
+                return;
+            }
+
             _updateTimerCard(id);
         }, 1000);
     }
@@ -12319,19 +12724,27 @@ function toggleCookingTimerById(id) {
 }
 
 function resetCookingTimerById(id) {
-    const t = _cookingTimers.find(t => t.id === id);
-    if (!t) return;
-    clearInterval(t.interval);
-    t.interval = null;
-    t.running = false;
-    t.seconds = t.total;
+    const timer = _cookingTimers.find(ti => ti.id === id);
+    if (!timer) return;
+    clearInterval(timer.interval);
+    timer.interval = null;
+    timer.running = false;
+    timer.seconds = timer.total;
     _updateTimerCard(id);
 }
 
 function _cookingTimerDoneById(id) {
     if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
     const timer = _cookingTimers.find(ti => ti.id === id);
-    if (_cookingTTS && timer) speakCookingStep(t('cooking.timer_expired_tts').replace('{label}', timer.label));
+    if (!timer) return;
+
+    clearInterval(timer.interval);
+    timer.interval = null;
+    timer.running = false;
+    timer.seconds = 0;
+
+    _notifyCookingTimer('done', timer.label);
+    removeCookingTimer(id); // auto-cancel finished timer (do not continue past 00:00)
 }
 
 function _updateTimerCard(id) {
@@ -12436,8 +12849,10 @@ function navigateCookingStep(delta) {
         closeCookingMode();
         return;
     }
+    _cookingWheelLastDelta = delta;
     _cookingStep = next;
     renderCookingStep();
+    _cookingStepFeedback();
     if (_cookingTTS) {
         const text = ((_cookingRecipe.steps || [])[_cookingStep] || '').replace(/^Passo\s*\d+\s*[:.]\s*/i, '');
         speakCookingStep(text);

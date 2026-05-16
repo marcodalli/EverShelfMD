@@ -46,18 +46,18 @@ All data stays on your server. No cloud, no subscriptions.
 
 ## 🆕 What's New
 
-### v1.7.1 (2026-05-04)
-- Destructive actions ("Butta tutto", "Finisci tutto") now require a **5-second countdown confirmation** before executing
-- History undo button ↩ is now clearly visible (red tint, larger)
-- Undo confirmation uses the in-app modal instead of the native browser `confirm()`
+### v1.7.13 (2026-05-16)
+- **Critical fix:** Fresh-install crash resolved — `transactions` schema was missing the `undone` column, causing a database failure on every new installation
+- **Fix:** Race condition in DB migrations no longer causes `duplicate column name` errors on concurrent first requests
 
-### v1.7.0 (2026-05-04)
-- Smart auto-discovery rewrite (kiosk)
-- Gateway auto-pre-configuration after install
-- ErrorReporter init at setup start
-- Graceful Bring! no-key state
-- Use-quantity guard with shake animation
-- Demo mode (`?demo=1`)
+### v1.7.12 (2026-05-13)
+- "Use first" banner now shows opening date and location instead of a confusing calculated expiry
+- "Use All / Done" in recipes no longer deletes the inventory row — uses exact quantity instead
+- Scan page fully redesigned: 2× zoom, torch, camera flip, 3 input tabs, AI Number OCR, recent products chips
+- Anomaly detection: false positives eliminated (untracked direction removed, minimum 5 txn + 7-day span)
+- AI price estimation for each Bring! shopping item with real-time dashboard total badge
+- Kiosk v1.6.0: BLE scale gateway is now built-in — no separate APK needed
+- Complete i18n: 934 keys per language
 
 → See the full [CHANGELOG](https://github.com/dadaloop82/EverShelf/blob/main/CHANGELOG.md)
 

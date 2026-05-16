@@ -8,7 +8,7 @@ The EverShelf Kiosk app turns any Android tablet into a dedicated, locked-down k
 
 **[⬇ Download latest APK](https://github.com/dadaloop82/EverShelf/releases/latest/download/evershelf-kiosk.apk)**
 
-> Current version: **v1.5.0** — requires Android 7.0+
+> Current version: **v1.6.0** — requires Android 7.0+
 
 ---
 
@@ -16,7 +16,7 @@ The EverShelf Kiosk app turns any Android tablet into a dedicated, locked-down k
 
 - Displays the EverShelf web app in a **full-screen WebView** (no browser chrome)
 - **Locks the screen** with Android's `startLockTask` — home, recents, and back buttons are blocked
-- Runs the **Scale Gateway** app in the background automatically on startup
+- Runs the **built-in BLE scale gateway** as an integrated foreground service — no external app required
 - Provides a **native TTS bridge** so Cooking Mode reads steps aloud via Android TextToSpeech
 - Auto-detects your EverShelf server on the LAN with a **smart discovery scanner**
 - Reports errors and install failures back to the developer automatically
@@ -46,11 +46,13 @@ Enter your EverShelf server URL (e.g. `https://192.168.1.100/dispensa`).
 - Only scans your actual Wi-Fi/Ethernet subnet (VPN and cellular interfaces ignored)
 - Real-time feedback as hosts are tested
 
-### Step 5 — Scale Gateway
-If you have a BLE smart scale, install and configure the Scale Gateway:
-1. Tap **"Installa Gateway"** — the APK is downloaded from GitHub and installed via `PackageInstaller`
-2. If installation fails, a diagnostic dialog shows: status code, error message, APK size, Android version, and device model — plus a "Riprova" button
-3. On success, the wizard automatically writes `scale_enabled=true` and `scale_gateway_url=ws://127.0.0.1:8765` to your EverShelf server
+### Step 5 — Smart Scale
+If you have a Bluetooth LE smart scale, configure it here:
+1. Tap **"Yes, I have a scale"** — the app scans for nearby BLE devices
+2. Tap your scale in the list (devices most likely to be scales are marked with ⭐)
+3. On selection, the app automatically writes `scale_enabled=true` and `scale_gateway_url=ws://127.0.0.1:8765` to your EverShelf server
+
+The BLE gateway runs as a built-in foreground service — **no external APK needed**.
 
 ### Step 6 — Screensaver
 Choose whether the screen should go dark after inactivity.
@@ -96,11 +98,6 @@ The WebView accepts self-signed certificates automatically. No configuration nee
 ---
 
 ## Troubleshooting
-
-### "Impossibile installare il gateway"
-- Make sure "Install from unknown sources" is enabled for the kiosk app in Android Settings → Apps → Special app access
-- Check that there is enough free storage (the APK is ~15 MB)
-- The diagnostic dialog shows the exact failure code — include it when opening an issue
 
 ### "Server non trovato" during auto-discovery
 - Make sure your tablet and server are on the same Wi-Fi network

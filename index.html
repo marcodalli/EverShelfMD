@@ -1320,6 +1320,30 @@
 
         <button class="btn btn-large btn-success full-width mt-2" onclick="saveSettings()" data-i18n="btn.save_config">💾 Salva Configurazione</button>
         <div id="settings-status" class="settings-status" style="display:none"></div>
+
+        <!-- About & Support -->
+        <div class="settings-section" style="margin-top:24px">
+            <h3 class="settings-section-title" data-i18n="about.title">About</h3>
+            <div class="settings-row" style="justify-content:space-between;align-items:center">
+                <span class="settings-label" data-i18n="about.version">Version</span>
+                <span id="about-version-label" class="settings-hint" style="font-family:monospace">—</span>
+            </div>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-outline full-width" onclick="reportBugManual()" id="btn-report-bug">
+                    🐛 <span data-i18n="about.report_bug">Segnala un problema</span>
+                </button>
+                <p class="settings-hint" style="text-align:center;margin:0" data-i18n="about.report_bug_hint">Qualcosa non funziona? Apri una segnalazione su GitHub.</p>
+                <div style="display:flex;gap:8px">
+                    <a class="btn btn-outline full-width" style="text-decoration:none;text-align:center"
+                       href="https://github.com/dadaloop82/EverShelf/blob/main/CHANGELOG.md"
+                       target="_blank" rel="noopener" data-i18n="about.changelog">Changelog</a>
+                    <a class="btn btn-outline full-width" style="text-decoration:none;text-align:center"
+                       href="https://github.com/dadaloop82/EverShelf"
+                       target="_blank" rel="noopener" data-i18n="about.github">GitHub</a>
+                </div>
+            </div>
+            <div id="report-bug-status" style="display:none;margin-top:8px;text-align:center;font-size:0.85rem"></div>
+        </div>
     </section>
 
     <!-- ===== GEMINI CHAT ===== -->
@@ -1430,9 +1454,6 @@
         </div>
         <div id="recipe-result" style="display:none" class="recipe-result">
             <div id="recipe-content"></div>
-            <button class="btn btn-large btn-cooking full-width mt-2" onclick="startCookingMode()" data-i18n="recipes.start_cooking">
-                👨‍🍳 Modalità Cucina
-            </button>
             <button class="btn btn-large btn-secondary full-width mt-2" onclick="regenerateRecipe()" data-i18n="recipes.regenerate">
                 🔄 Generane un'altra
             </button>
@@ -1507,7 +1528,11 @@
             <button class="cooking-restart-btn" onclick="restartCookingMode()" title="Ricomincia dall'inizio">↺ Ricomincia</button>
         </div>
         <div class="cooking-progress-dots" id="cooking-progress-dots"></div>
-        <div class="cooking-step-text" id="cooking-step-text"></div>
+        <div class="cooking-wheel" id="cooking-wheel" tabindex="0" aria-label="Navigazione passi ricetta">
+            <div class="cooking-step-ghost cooking-step-prev" id="cooking-step-prev"></div>
+            <div class="cooking-step-text" id="cooking-step-text"></div>
+            <div class="cooking-step-ghost cooking-step-next" id="cooking-step-next"></div>
+        </div>
         <button class="cooking-replay-btn" id="cooking-replay" onclick="replayCookingTTS()" title="Rileggi questo passo">🔊 Rileggi</button>
         <div class="cooking-timer-suggest" id="cooking-timer-suggest" style="display:none">
             <button class="cooking-timer-add-btn" onclick="addSuggestedCookingTimer()">

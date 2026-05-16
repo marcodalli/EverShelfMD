@@ -1085,5 +1085,16 @@
   },
   "appliances": {
     "empty": "Nessun elettrodomestico aggiunto"
+  },
+  "about": {
+    "title": "Informazioni",
+    "version": "Versione",
+    "report_bug": "Segnala un problema",
+    "report_bug_hint": "Qualcosa non funziona? Apri una segnalazione su GitHub.",
+    "report_bug_sending": "Invio in corso…",
+    "report_bug_sent": "Segnalazione inviata — grazie!",
+    "report_bug_error": "Impossibile inviare la segnalazione. Controlla la connessione.",
+    "changelog": "Changelog",
+    "github": "Repository GitHub"
   }
 }

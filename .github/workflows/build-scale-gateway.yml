@@ -1,13 +1,14 @@
-name: Build & Release Scale Gateway APK
+name: Build & Release Scale Gateway APK (DEPRECATED)
+# ⚠️  This workflow is disabled. The Scale Gateway is deprecated since Kiosk v1.6.0.
+# BLE scale support is now built into the EverShelf Kiosk app.
+# Kept for reference — re-enable manually via workflow_dispatch if needed for legacy setups.
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'evershelf-scale-gateway/**'
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'yes' to confirm you want to build the deprecated gateway APK"
+        required: true
 
 permissions:
   contents: write

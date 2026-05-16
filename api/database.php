@@ -95,6 +95,7 @@ function initializeDB(PDO $db): void {
             quantity REAL NOT NULL,
             location TEXT NOT NULL DEFAULT 'dispensa',
             notes TEXT DEFAULT '',
+            undone INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
         );
@@ -117,10 +118,12 @@ function migrateDB(PDO $db): void {
     $cols = $db->query("PRAGMA table_info(products)")->fetchAll();
     $colNames = array_column($cols, 'name');
     if (!in_array('package_unit', $colNames)) {
-        $db->exec("ALTER TABLE products ADD COLUMN package_unit TEXT DEFAULT ''");
+        try { $db->exec("ALTER TABLE products ADD COLUMN package_unit TEXT DEFAULT ''"); }
+        catch (PDOException $e) { if (strpos($e->getMessage(), 'duplicate column') === false) throw $e; }
     }
     if (!in_array('shopping_name', $colNames)) {
-        $db->exec("ALTER TABLE products ADD COLUMN shopping_name TEXT DEFAULT ''");
+        try { $db->exec("ALTER TABLE products ADD COLUMN shopping_name TEXT DEFAULT ''"); }
+        catch (PDOException $e) { if (strpos($e->getMessage(), 'duplicate column') === false) throw $e; }
     }
 
     // Migrate transactions CHECK constraint to allow 'waste' type

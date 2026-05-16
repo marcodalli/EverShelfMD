@@ -1085,5 +1085,16 @@
   },
   "appliances": {
     "empty": "No appliances added"
+  },
+  "about": {
+    "title": "About",
+    "version": "Version",
+    "report_bug": "Report a Bug",
+    "report_bug_hint": "Something not working? Open an issue on GitHub.",
+    "report_bug_sending": "Sending…",
+    "report_bug_sent": "Report sent — thank you!",
+    "report_bug_error": "Could not send the report. Check your connection.",
+    "changelog": "Changelog",
+    "github": "GitHub Repository"
   }
 }

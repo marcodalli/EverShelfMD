@@ -63,7 +63,7 @@ The kiosk app is fully self-contained. No separate gateway app is required.
 3. Choose your language
 4. Grant camera, microphone and Bluetooth permissions when prompted
 5. Enter your EverShelf server URL (e.g. `https://192.168.1.100/dispensa`) or use auto-discovery
-6. If you have a Bluetooth scale: tap **"Sì, ho una bilancia"**, wait for the BLE scan, then tap your scale in the list
+6. If you have a Bluetooth scale: tap **"Yes, I have a scale"**, wait for the BLE scan, then tap your scale in the list
 7. Done — the web app loads in full-screen kiosk mode
 
 ### Scale Configuration
@@ -76,7 +76,7 @@ BLE scale setup happens inside the kiosk app itself — **no external app needed
 
 ### Exiting Kiosk Mode
 
-Tap the **✕** button in the header. A confirmation dialog appears — tap "Esci" to exit.
+Tap the **✕** button in the header. A confirmation dialog appears — tap **"Exit"** to confirm.
 
 ---
 

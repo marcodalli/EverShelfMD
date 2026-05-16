@@ -25,54 +25,14 @@
 [![SQLite](https://img.shields.io/badge/SQLite-3-blue.svg)](https://www.sqlite.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](Dockerfile)
 [![i18n](https://img.shields.io/badge/i18n-IT%20%7C%20EN%20%7C%20DE-orange.svg)](translations/)
-[![Version](https://img.shields.io/badge/version-1.7.12-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.7.13-brightgreen.svg)](CHANGELOG.md)
+[![GitHub stars](https://img.shields.io/github/stars/dadaloop82/EverShelf?style=social)](https://github.com/dadaloop82/EverShelf/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/dadaloop82/EverShelf/main)](https://github.com/dadaloop82/EverShelf/commits/main)
+[![Contributors](https://img.shields.io/github/contributors/dadaloop82/EverShelf)](https://github.com/dadaloop82/EverShelf/graphs/contributors)
+[![GitHub Discussions](https://img.shields.io/github/discussions/dadaloop82/EverShelf)](https://github.com/dadaloop82/EverShelf/discussions)
+[![CI](https://github.com/dadaloop82/EverShelf/actions/workflows/ci.yml/badge.svg)](https://github.com/dadaloop82/EverShelf/actions/workflows/ci.yml)
 
 ---
-
-## 🌍 Recent Updates (v1.7.12)
-
-- **Banner aperto con indicazione posizione** — Nella sezione "Usa prima" il testo ora mostra "Quella nel frigo, aperta da X giorni" invece di una data di scadenza calcolata che poteva risultare confusa.
-- **Ricette: quantità in pezzi per prodotti pz** — Il prompt AI e la post-elaborazione PHP ora istruiscono Gemini a esprimere `qty_number` come pezzi interi (non grammi) per i prodotti con unità `pz` (es. Pan bauletto, fette biscottate). Il fallback PHP non divide più per 100 quando `default_quantity = 0`.
-- **Fix: "Usa TUTTO" nelle ricette non elimina più la riga** — Il pulsante "Usa TUTTO / Finito" nella modal di utilizzo ricette inviava `use_all: true` che causava un `DELETE` immediato senza conferma. Ora calcola la quantità esatta dagli item disponibili e fa un normale `inventory_use`.
-
-- **Scan page redesign** — La pagina di scansione è stata completamente ridisegnata: **2× zoom fisso** (hardware o CSS), **torcia** con feedback visivo, **flip fotocamera** (front/back), **3 tab input** (Barcode / Nome / AI), **prodotti recenti** (ultimi 6 in localStorage), **live code overlay** durante la scansione parziale, **confirm overlay** al successo, **angoli guida** nel viewport.
-- **AI Number OCR** — Dopo 4 secondi senza scansione compare il bottone "Leggi numeri con AI": Gemini analizza il frame video e restituisce le cifre del barcode anche quando lo scanner ottico non riesce a leggerlo.
-- **Fix falsi positivi anomalie** — Rimossa la direzione `untracked` dal rilevatore di anomalie; le predizioni di consumo richiedono ora min 5 transazioni e 7 giorni di storico.
-- **Fix menu suggerimenti scan** — Rimosso il datalist dal campo Nome nella pagina scansione (non più aperto su tablet).
-- **Fix falsi positivi anomalie consumo** — `getConsumptionPredictions` richiedeva solo 3 transazioni, potendo generare rate esplose su dati ravvicinati. Ora: min 5 txn, min 7gg span, skip se consumo predetto < 15% baseline.
-
-- **Banner "Imposta scadenza" ora funziona** — Il pulsante sul banner "nessuna scadenza" apriva una funzione inesistente. Corretto, ora apre correttamente la modal di modifica.
-- **Banner aperto vs scaduto** — I prodotti con `opened_at` mostrano "Aperto da N giorni in [posizione]" invece di "Scaduto!", con la posizione (frigo/dispensa/freezer) esplicitamente indicata.
-- **Shelf life latte UHT** — Il latte generico è ora trattato come UHT (7 giorni dopo apertura) invece che fresco (4 giorni).
-- **Niente più false anomalie di consumo** — Il rilevatore ora ignora i casi in cui `expected = 0` (prodotto probabilmente ricomprato) e alza la soglia "more than expected" al 400%. Le notifiche rimangono solo per consumi significativamente inferiori al previsto.
-- **Previsioni consumo adattive e meno rumorose** — Le previsioni ora pesano anche il comportamento recente dopo l'ultimo rifornimento; i banner "più del previsto" non vengono più mostrati (spesso erano falsi positivi), mentre i casi "meno del previsto" appaiono solo con evidenza sufficiente.
-- **Scaduti nascondono prodotti già buttati** — La sezione scaduti ora filtra correttamente i prodotti con `quantity = 0`.
-- **Docker: fix permessi DB al primo avvio** — `_ensureDataDir()` crea la directory `data/` se mancante e tenta `chmod(0775)` se non scrivibile, risolvendo `SQLSTATE[HY000][14]` su volumi Docker freschi.
-- **AI price estimation for shopping list** — Each Bring! shopping item now shows an estimated retail price badge (unit price + total). Prices are fetched via Gemini AI, cached server-side for 3 months, and stored client-side in `sessionStorage` to survive navigation. The dashboard shopping stat card shows a live green `ca. €X.XX` badge that updates in real-time as prices are calculated — even in background when you're on another tab.
-- **Kiosk v1.7.0: OTA update system** — "Cerca aggiornamenti" button in Settings triggers a forced GitHub release check; new `installUpdate()` JS bridge calls Android `DownloadManager` directly (lockTask mode blocks external browser links); graceful degradation for older APKs with manual instructions. Automatic OTA check every 6 hours with native update banner.
-- **Kiosk: consistent APK signing** — Project keystore (`evershelf.jks`) committed to the repo; every build — local or CI — now produces an APK with the same signature, eliminating "APK incompatible / signature conflict" errors on OTA update.
-- **GitHub Actions: auto-publish kiosk APK** — On every push to `main` that touches `evershelf-kiosk/`, Actions builds the APK and publishes a versioned semver release (`kiosk-X.Y.Z`) plus updates the `kiosk-latest` alias. No more manual release uploads.
-- **Fix: false "update available" on launch** — `checkForUpdates` now requires a strictly-greater semver tag to flag an update. Non-semver tags (e.g. `kiosk-latest`) no longer trigger a false positive immediately after a fresh install.
-- **Kiosk: live scale diagnostic panel** — When connected, Settings shows device name, battery %, real-time weight, protocol and reconnection status without leaving the settings page.
-- **Kiosk: scale dot visible on header** — Connected-state dot changed from green-on-green to white fill + green glow, clearly visible on any background.
-- **Kiosk: reconfigure BLE scale** — New "Riconfigura bilancia BLE" button in Settings; shows amber notice with download link if the installed APK predates the `reconfigureScale()` bridge method.
-- **Nutrition analysis dashboard** — Category distribution pie chart (3D conic-gradient), health/variety/freshness score bars, alternates with the anti-waste section hourly.
-- **Screensaver nutrition panel** — Animated 3D pie + donut ring scores rotate with fact cards every 5 minutes in the screensaver overlay.
-- **Automatic error reporting** — Unhandled JS errors, Android crashes and PHP exceptions are silently posted to `api/?action=report_error`; the server deduplicates by fingerprint and creates or comments on a GitHub Issue automatically. Crash details are persisted to `SharedPreferences` so even errors that prevent network I/O are sent on the next launch.
-- **Demo mode (JS)** — Full frontend demo with mock pantry data, Gemini enabled, Bring! writes silently no-op'd; accessible via `?demo=1` or `.env` `DEMO_MODE=true`.
-- **Graceful Bring! no-key state** — When Bring! credentials are not configured, the shopping tab shows a friendly message with a direct link to Settings instead of a raw error.
-- **Use-quantity guard** — Consuming more than the stocked quantity at a given location is now blocked client-side with a shake animation on the quantity field.
-- **Kiosk v1.6.0: BLE scale gateway integrated** — The standalone Scale Gateway app is no longer needed. BLE scanning, GATT connection and the WebSocket server (`:8765`) now run as a built-in `GatewayService` foreground service inside the kiosk app. Setup step 4 shows a live BLE device scan — users select their scale directly, no external APK install required. The external gateway app is deprecated.
-- **Kiosk setup wizard overhaul** — Auto-discovery rewritten with `ExecutorCompletionService` + `NetworkInterface` (no deprecated `WifiManager`), 60 parallel TCP pre-checks, real-time UI feedback, ports 80/443/8080/8443, correct LAN subnet detection (VPN/cellular interfaces filtered, `wlan`/`eth` prioritised).
-- **Kiosk permissions flow** — Grant button transforms into a green "✅ Permessi concessi — Continua →" button after permissions are granted instead of just showing a card.
-- **3 new AI features (Gemini)** — Storage/shelf-life hint shown inline in the add form; AI-enriched shopping suggestions with a short practical tip per item; plain-language anomaly explanation via a "🤖 Spiega" button on anomaly banners.
-- **Security hardening** — `get_settings` no longer exposes API keys in plain text (boolean flags only); `save_settings` protected by optional `SETTINGS_TOKEN` (validated with `hash_equals`); native `DEMO_MODE` in `.env` blocks all write operations at the PHP router level before any other guard.
-- **Real-time webapp update detection** — An inline header pill appears when a newer release is on GitHub (checked on load + every 30 min); no intrusive full-page banners.
-- **Gemini availability flag** — All AI entry points check `_geminiAvailable` before firing; the header button shows a visual no-AI state (greyed + amber dot) when no key is configured.
-- **Dashboard skeleton loading** — Stat cards show an animated shimmer while data loads instead of a jarring `0` flash for 3–5 seconds.
-- **APK self-update with conflict recovery** — Both Kiosk and Scale Gateway use the `PackageInstaller` session API for OTA installs; a signature conflict now shows a dialog to uninstall the old version instead of a cryptic failure.
-- **Smarter low-quantity alerts** — The "suspiciously low quantity" banner is no longer raised for a partially-used entry when the same product has stock in another location.
-- **Non-alarmist expired banner** — Adapts icon, colour, and title to the actual safety level: green ✅ for long-life products still safe, amber 👀 for items to check, red 🚫 only for genuinely dangerous items.
 
 ## ✨ Features
 
@@ -390,32 +350,7 @@ The application uses no build tools — edit files directly and refresh.
 
 ## 📋 Roadmap
 
-- [x] Multi-language support (i18n) — 3 languages (it/en/de), 347 keys
 - [ ] User authentication / multi-user support
-- [x] Docker container for easy deployment — see [Dockerfile](Dockerfile) + [docker-compose.yml](docker-compose.yml)
-- [x] REST API documentation (OpenAPI/Swagger) — see [docs/openapi.yaml](docs/openapi.yaml)
-- [x] First-run setup wizard — 4-step guided configuration
-- [x] API rate limiting — file-based, 3 tiers (120/15/5 req/min)
-- [x] CI/CD pipeline — GitHub Actions (lint, Docker build, translation validation)
-- [x] Android kiosk mode — dedicated tablet app with screen pinning
-- [x] Anomaly detection banner — suspicious quantities + consumption predictions
-- [x] AI scan local matching — suggest existing pantry products before OFF lookup
-- [x] Scale auto-fill improvements — 10g threshold, ml conversion hints
-- [x] Update notification system — inline header pill (webapp) + kiosk checks GitHub releases
-- [x] Kiosk OTA update — forced check button, `installUpdate()` bridge, graceful old-APK fallback
-- [x] Kiosk consistent APK signing — project keystore eliminates signature conflicts on OTA
-- [x] GitHub Actions kiosk CI — auto-builds and publishes versioned semver APK on every push to main
-- [x] Kiosk live scale diagnostics — device, battery, real-time weight in Settings when connected
-- [x] Nutrition analysis dashboard — category pie + health/variety/freshness scores, alternates with waste section
-- [x] Screensaver nutrition panel — animated pie + donut ring scores rotate with facts
-- [x] Automatic error reporting — JS/Android/PHP errors → GitHub Issues with deduplication
-- [x] Generic shopping name grouping — compound-phrase + keyword map (100+ entries) + Gemini AI fallback
-- [x] Auto-add to Bring! on product depletion — no confirmation step when stock reaches zero
-- [x] Native Android TTS in kiosk — bypasses Web Speech API voice detection issues
-- [x] AI product storage hint — background Gemini call suggests location + shelf-life in the add form
-- [x] AI shopping tips enrichment — each suggestion enriched with a short practical tip
-- [x] AI anomaly explanation — "🤖 Spiega" button explains discrepancies in plain language
-- [x] Security hardening — no raw key exposure, SETTINGS_TOKEN auth, DEMO_MODE native blocking
 - [ ] Offline mode with service worker
 - [ ] Export/import inventory data
 - [ ] Notification system (Telegram, email) for expiring products
@@ -465,11 +400,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## 📸 Screenshots
 
-| | | |
-|:---:|:---:|:---:|
-| ![Dashboard](assets/img/screenshots/01_dashboard.jpg) | ![Inventory](assets/img/screenshots/02_inventory.jpg) | ![Barcode Scanner](assets/img/screenshots/03_barcode_scanner.jpg) |
-| **Dashboard** — Inventory overview with counters by location (pantry, fridge, freezer), upcoming expiry alerts, and consumed vs. wasted tracking over the last 30 days. | **Inventory** — Full product list filterable by location (All / Pantry / Fridge / Freezer) and searchable by name, with category, quantity, and expiry date. | **Barcode Scanner** — Scan barcodes with the camera (QuaggaJS) or enter manually. Shopping mode lets you register purchased products in quick sequence. |
-| ![AI Recipe Detail](assets/img/screenshots/04_recipe_detail.jpg) | ![Recipes](assets/img/screenshots/05_recipes.jpg) | ![Cooking Mode](assets/img/screenshots/06_cooking_mode.jpg) |
-| **AI Recipe Detail** — Recipe generated by Gemini AI using expiring ingredients: each ingredient is matched to the real inventory with quantity and location, ready to scale. | **Recipes** — History of AI-generated recipes, organized by day and meal (lunch / dinner / other), with preparation and cooking time. | **Cooking Mode** — Fullscreen step-by-step guide with Text-to-Speech. Each step shows the ingredient to use from your pantry with an integrated "Use" button. |
-| ![AI Chat](assets/img/screenshots/07_ai_chat.jpg) | ![Shopping List](assets/img/screenshots/08_shopping_list.jpg) | ![Smart Predictions](assets/img/screenshots/09_smart_predictions.jpg) |
-| **Gemini Chat** — AI assistant that knows your pantry, your appliances, and your preferences. Suggests snacks, smoothies, or quick meals with a single tap. | **Shopping List** — List synced with Bring!, organized by product category, with urgency indicators and links to search for prices online. | **Smart Predictions** — AI analysis of historical consumption: shows what is running low, how much time is left, and why restocking is recommended (regular use, nearly empty, opened). |
+For a live walkthrough with real data and full AI enabled, visit the **[live demo](https://evershelfproject.dadaloop.it/demo)** — no installation required.
+
+> Want to contribute a GIF or screenshots? See [CONTRIBUTING.md](CONTRIBUTING.md) — PRs welcome!

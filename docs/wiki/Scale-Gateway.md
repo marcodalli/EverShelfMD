@@ -1,6 +1,15 @@
-# ⚖️ Scale Gateway
+# ⚠️ Scale Gateway — Deprecated
 
-The EverShelf Scale Gateway is an Android app that bridges a Bluetooth LE smart scale to EverShelf, enabling automatic weight-based inventory tracking.
+> **As of EverShelf Kiosk v1.6.0, BLE scale support is fully integrated into the Kiosk app.**
+> You no longer need to install or configure this separate gateway.
+>
+> 📱 **Using the EverShelf Kiosk app?** → See [Android Kiosk](Android-Kiosk) — configure your scale in Step 5 of the setup wizard.
+>
+> 💻 **Not using the kiosk app?** The legacy gateway APK below still works for non-kiosk setups, but receives no new updates.
+
+---
+
+# Scale Gateway (legacy)
 
 ---
 
@@ -51,8 +60,6 @@ The Gateway runs a local WebSocket server on port **8765**. The EverShelf server
 ### 1. Install
 
 Download and install the APK. You may need to enable "Install from unknown sources" in Android Settings.
-
-> **Kiosk users:** the Setup Wizard installs the gateway automatically in Step 5.
 
 ### 2. Launch the app
 

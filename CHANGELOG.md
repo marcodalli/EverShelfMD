@@ -5,105 +5,90 @@ All notable changes to EverShelf will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.13] - 2026-05-16
+
+### Fixed
+- **Fresh-install crash: `no such column: undone`** — The `transactions` table was created in `initializeDB()` without the `undone` column, but the composite index `idx_transactions_pid_type_undone` immediately referenced it, crashing every new installation at first DB access.  Added `undone INTEGER DEFAULT 0` to the transactions schema in `initializeDB()`.
+- **Race condition: `duplicate column name: package_unit`** — Concurrent API requests on a new installation could all pass the `PRAGMA table_info` guard simultaneously and each try to `ALTER TABLE products ADD COLUMN package_unit`, with all but the first failing with a PDOException.  Wrapped all `ALTER TABLE … ADD COLUMN` calls in try/catch to silently ignore duplicate-column errors.
+
 ## [1.7.12] - 2026-05-13
 
 ### Fixed
-- **Banner "Usa prima" con data calcolata confusa** — `_renderUseExpiryHint` mostrava una data di scadenza *calcolata* (shelf life dopo apertura) anziché la data reale. Ora, se il prodotto ha `opened_at`, il banner mostra "Quella [nel frigo], aperta da X giorni — usala prima!" usando la nuova chiave `use.expiry_warning_opened`.
-- **"Usa TUTTO / Finito" nelle ricette cancellava la riga** — `submitRecipeUse(true)` inviava `use_all: true` all'API che eseguiva un `DELETE` diretto sulla riga di inventario senza conferma. La funzione ora calcola la quantità esatta dagli item disponibili (`_recipeUseContext.items`) e invia un normale `inventory_use` con quantità esplicita.
-- **Ricette: `qty_number` in grammi per prodotti `pz`** — Il prompt AI e la post-elaborazione PHP ora istruiscono Gemini a esprimere `qty_number` come pezzi interi per ingredienti con unità `pz` (Pan bauletto, fette biscottate, ecc.). La lista ingredienti nel prompt include `[usa PEZZI interi]` per ogni prodotto `pz`. Il fallback PHP per `pz` senza `default_quantity` non divide più per 100 (trattando grammi come pezzi), ma usa il `qty_number` restituito dall'AI se sembra un conteggio plausibile, altrimenti 1.
+- **"Use first" banner showed a calculated expiry date** — `_renderUseExpiryHint` was displaying a *calculated* shelf-life date (from opening date) instead of the actual one. When `opened_at` is set, the banner now shows "That one [in the fridge], opened X days ago — use it first!" using the new `use.expiry_warning_opened` translation key.
+- **"Use All / Done" in recipes deleted the inventory row** — `submitRecipeUse(true)` was sending `use_all: true` to the API, which executed a direct `DELETE` on the inventory row without any confirmation. The function now calculates the exact quantity from the available items (`_recipeUseContext.items`) and sends a regular `inventory_use` with an explicit quantity.
+- **Recipes: `qty_number` returned in grams for piece-counted (`pz`) items** — The AI prompt and PHP post-processing now instruct Gemini to express `qty_number` as whole pieces for ingredients with unit `pz` (sliced bread, crackers, etc.). The ingredient list in the prompt includes `[use whole PIECES]` for each `pz` product. The PHP fallback for `pz` items without `default_quantity` no longer divides by 100, but uses the AI-returned `qty_number` if it is a plausible count, otherwise defaults to 1.
 
 ### Added
-- **Traduzione `use.expiry_warning_opened`** — Nuova chiave in `it.json`, `en.json`, `de.json` con placeholder `{loc}` (posizione) e `{when}` (giorni dall'apertura).
+- **Translation key `use.expiry_warning_opened`** — New key in `it.json`, `en.json`, `de.json` with `{loc}` (location) and `{when}` (days since opening) placeholders.
 
 ## [1.7.11] - 2026-05-12
 
 ### Added
-- **Scan page redesign** — La pagina di scansione è stata completamente ridisegnata per tablet e mobile:
-  - **2× zoom fisso** — zoom hardware se disponibile, altrimenti CSS `scale(2)` automatico.
-  - **Torcia** — bottone nel viewport con feedback toast e stato visivo.
-  - **Flip fotocamera** — switch front/back con persistenza in settings.
-  - **3 tab input** — Barcode / Nome / AI per un accesso rapido a ciascuna modalità.
-  - **Prodotti recenti** — chip degli ultimi 6 prodotti scansionati (localStorage), con icona categoria.
-  - **Live code overlay** — codice barcode rilevato parzialmente mostrato in sovrimpressione nel viewport.
-  - **Confirm overlay** — checkmark + nome prodotto per 900ms al riconoscimento avvenuto.
-  - **Angoli guida** — frame visivo per inquadrare il barcode.
-  - **AI Number OCR** — dopo 4s senza scansione, compare il bottone "Leggi numeri con AI": Gemini analizza l'immagine e legge le cifre del barcode anche se non viene letto otticamente.
-- **PHP `gemini_number_ocr`** — Nuovo endpoint POST; accetta un'immagine JPEG base64, chiede a Gemini di individuare il codice EAN-13 / EAN-8 stampato sul prodotto, e restituisce le cifre o `not_found`.
+- **Scan page redesign** — The scanner page has been completely redesigned for tablet and mobile:
+  - **2× fixed zoom** — hardware zoom if available, otherwise automatic CSS `scale(2)`.
+  - **Torch** — in-viewport button with toast feedback and visual state indicator.
+  - **Camera flip** — front/back switch with persistence in settings.
+  - **3 input tabs** — Barcode / Name / AI for quick access to each scanning mode.
+  - **Recent products** — chips for the last 6 scanned products (localStorage), with category icon.
+  - **Live code overlay** — partially detected barcode shown as overlay in the viewport during partial scan.
+  - **Confirm overlay** — checkmark + product name displayed for 900 ms on successful recognition.
+  - **Guide corners** — visual alignment frame for barcode centering.
+  - **AI Number OCR** — after 4 s without a scan, a "Read numbers with AI" button appears; Gemini analyses the video frame and returns barcode digits even when the optical scanner fails.
+- **PHP `gemini_number_ocr` endpoint** — New POST endpoint; accepts a base64 JPEG image, asks Gemini to locate the EAN-13 / EAN-8 code printed on the product, and returns the digits or `not_found`.
 
 ### Fixed
-- **Falsi positivi anomalia consumo "Mozzarella 3 pezzi"** — Rimossa la direzione `untracked` (consumo maggiore degli acquisti registrati) che generava banner su ogni prodotto con acquisti non tracciati. Ora vengono segnalate solo le anomalie `phantom` e `missing`.
-- **Predizione "~0g/settimana"** — Il modello richiedeva ora min 5 transazioni (era 3) e un arco temporale di almeno 7 giorni; se il consumo predetto è < 15% della baseline viene saltato, eliminando i falsi positivi su prodotti con poche transazioni ravvicinate.
-- **Menu a tendina suggerimenti sul campo Nome (scan)** — Rimosso `list="common-products"` dal campo di input, il datalist non viene più aperto su tablet.
+- **False consumption anomaly positives (e.g. "Mozzarella 3 pcs")** — Removed the `untracked` direction (consumption higher than recorded purchases), which was generating banners for every product with untracked purchase history. Only `phantom` and `missing` anomalies are now reported.
+- **"~0 g/week" consumption prediction** — The model now requires a minimum of 5 transactions (was 3) and a time span of at least 7 days; predictions where consumption is < 15% of the baseline are skipped, eliminating false positives for products with few closely-spaced transactions.
+- **Suggestion dropdown on the Name field (scan page)** — Removed `list="common-products"` from the input field; the datalist is no longer triggered on tablets.
 
 ## [1.7.10] - 2026-05-11
 
 ### Fixed
-- **Banner "Imposta scadenza" non faceva nulla** — `editBannerNoExpiry()` chiamava `openEditInventoryModal()` che non esiste. Corretto in `editInventoryItem()` (la funzione corretta usata da tutti gli altri handler banner). Aggiunto anche il fetch preventivo di `inventory_list` perché `currentInventory` è vuoto sulla dashboard.
-- **"Prodotto non trovato" aprendo modal da banner** — `currentInventory` è sempre vuoto sulla dashboard; il fetch dell'inventario ora avviene prima di aprire la modal (stesso pattern di `editReviewItem` e `weighBannerItem`).
-- **Banner scaduto su latte UHT aperto** — Il testo mostrava "Scaduto!" invece di "Aperto da troppo tempo". Ora i prodotti con `opened_at` mostrano "Aperto da N giorni in [posizione]" sia nel titolo che nel dettaglio del banner.
-- **Shelf life latte generico 4 → 7 giorni** — Il latte senza qualificatori (es. "Latte") veniva trattato come fresco (4 giorni). Il latte fresco è già gestito esplicitamente (`latte fresco/intero/parzial/scremato` → 3gg); il generico ora vale 7 giorni (default UHT). Fix applicato sia in PHP (`database.php`) che in JS (`app.js`).
-- **`opened_at` stale sulle confezioni intere dopo split** — Quando un uso splitta la riga in "confezioni intere + frazione aperta", la riga delle intere non azzerava `opened_at`. Ora tutti e 3 i percorsi di split eseguono `opened_at = NULL` sulla riga sigillata.
-- **`inventory_update` non registrava transazioni** — La modal di modifica quantità aggiornava l'inventario senza creare transazioni. La differenza viene ora registrata automaticamente come `'in'` o `'out'` con nota `[Correzione manuale]`, evitando falsi positivi nel rilevatore di anomalie.
-- **False anomalie di consumo dopo la spesa** — La baseline della prediction usava solo la quantità del rifornimento (`restockQty`), ignorando le scorte preesistenti → `actual > expected` sistematicamente. Nuova baseline: `qty_attuale + consumato_da_ultimo_rifornimento`, che riflette correttamente la realtà indipendentemente dalle scorte pregresse.
-- **Banner "consumo anomalo" su quasi tutti i prodotti** — Due fix:
-  1. `expected = 0` non genera più anomalia "more" (il modello pensa che dovresti aver finito, ma hai ricomprato).
-  2. Soglia "more than expected" alzata al 400% (era 30%); "less than expected" rimane al 30%.
-- **Sezione scaduti mostra prodotti già buttati** — La query `expired` mancava di `AND i.quantity > 0`; i prodotti buttati (qty=0) con scadenza passata continuavano ad apparire. Corretta la query + pulizia righe orfane nel DB.
-- **Hardcoded `scade il` in banner** — Stringa italiana hardcodata nel dettaglio del banner scaduti rimossa.
-- **Docker: `SQLSTATE[HY000][14] unable to open database file`** — Aggiunta `_ensureDataDir()` in `database.php` che crea la directory se mancante e tenta `chmod(0775)` se non scrivibile.
+- **"Set expiry" banner did nothing** — `editBannerNoExpiry()` was calling `openEditInventoryModal()` which does not exist. Fixed to call `editInventoryItem()` (the correct function used by all other banner handlers). Added a prefetch of `inventory_list` because `currentInventory` is empty on the dashboard.
+- **"Product not found" when opening modal from a banner** — `currentInventory` is always empty on the dashboard; the inventory fetch now happens before opening the modal (same pattern as `editReviewItem` and `weighBannerItem`).
+- **Expired banner on opened UHT milk** — The banner was showing "Expired!" instead of "Opened too long". Items with `opened_at` now display "Opened X days ago in [location]" in both the title and the banner detail.
+- **Generic milk shelf life 4 → 7 days** — Milk without qualifiers (e.g. "Milk") was treated as fresh (4 days). Fresh milk is still handled explicitly (`latte fresco/intero/parzial/scremato` → 3 days); the generic case now defaults to 7 days (UHT default). Fix applied in both PHP (`database.php`) and JS (`app.js`).
+- **Stale `opened_at` on sealed packages after split** — When a use operation splits a row into "whole sealed packages + opened fraction", the sealed-packages row was not clearing `opened_at`. All 3 split code paths now execute `opened_at = NULL` on the sealed row.
+- **`inventory_update` was not recording transactions** — The quantity-edit modal updated inventory without creating transaction records. The quantity difference is now automatically recorded as `in` or `out` with a `[Manual correction]` note, preventing false positives in the anomaly detector.
+- **False consumption anomalies after restocking** — The prediction baseline was using only the restock quantity (`restockQty`), ignoring pre-existing stock, causing `actual > expected` systematically. New baseline: `current_qty + consumed_since_last_restock`, which correctly reflects the real situation regardless of prior stock levels.
+- **Anomaly banner firing on almost all products** — Two fixes:
+  1. `expected = 0` no longer generates a "more" anomaly (the model assumed you should have run out, but you restocked).
+  2. "More than expected" threshold raised to 400% (was 30%); "less than expected" threshold remains at 30%.
+- **Expired section showing already-discarded products** — The `expired` query was missing `AND i.quantity > 0`; discarded products (qty=0) with a past expiry kept appearing. Query fixed and orphan rows cleaned from the DB.
+- **Hardcoded Italian string `scade il` in banner** — Replaced with the correct i18n key.
+- **Docker: `SQLSTATE[HY000][14] unable to open database file`** — `_ensureDataDir()` in `database.php` now creates the `data/` directory if missing and attempts `chmod(0775)` if not writable, resolving the error on freshly mounted Docker volumes.
 
 ### Added
-- **i18n completa** — Aggiunti ~25 chiavi di traduzione mancanti per UI kiosk, gemini, banner, scanner, shopping, appliances in tutti e 3 i file (`it.json`, `en.json`, `de.json`). Totale: 934 chiavi per lingua.
-
-
-### Added
-- **Category badge on inventory items** — Every product in the inventory now displays a macro-category badge (icon + label) next to the location badge. Badges showing `altro` are asynchronously refined via the new `guess_category` AI endpoint (Gemini + `data/category_ai_cache.json` cache) so the correct category appears automatically after the page loads.
-- **Category search** — The inventory search bar now matches items by category. Typing "biscotti" returns every cookie/biscuit regardless of brand or exact name; the match uses both the direct category key and the translated label.
-- **Brand map in `guessCategoryFromName`** — A fast-path brand table (Oreo, Ringo, Uno, Barilla, De Cecco, Galbani, Mutti, Lavazza, etc.) provides instant category resolution before any regex evaluation.
-- **PHP `guess_category` endpoint** — New server-side action that calls Gemini to classify a product name into a local category key, with file-based caching (`data/category_ai_cache.json`). Returns `altro` immediately when no Gemini API key is configured.
-
-### Fixed
-- **Duplicate banner alerts** — `loadBannerAlerts()` was occasionally enqueuing the same item multiple times when called concurrently. Fixed with a `_bannerLoading` re-entrancy guard and a `_queuedItemIds` Set that prevents any item from being pushed more than once per refresh cycle.
-- **`mapToLocalCategory` with `en:dairies` / `en:dairies-and-eggs`** — The dairy regex was not matching OpenFoodFacts tags that use the `dairi` stem; extended to cover the full range of dairy tags.
-- **`mapToLocalCategory` always returning `altro`** — When the input category was already `altro`, the function exited the direct-match loop before attempting any fallback, losing all name-based guesses. The loop now skips the `altro` key for the early-return and falls back to `guessCategoryFromName(productName)` at the end.
-- **"Tonno all'olio" → condimenti** — `tonno\b` was matched after `olio\b` (condimenti) due to regex ordering. Moved the conserve block before the condimenti block so tuna products resolve correctly.
-
-### Security
-- **AI function guards** — All Gemini-powered functions now check `_geminiAvailable` (JS) or the presence of `GEMINI_API_KEY` (PHP) before executing. Affected functions: `_refineCategoryBadgesAsync`, `fetchAllPrices`, `getShoppingPrice`. The PHP endpoint returns `{"success":false,"error":"no_api_key"}` instead of silently returning empty results, making the missing-key state explicit and diagnosable.
+- **Complete i18n** — Added ~25 missing translation keys for kiosk UI, Gemini responses, banners, scanner, shopping, and appliances across all 3 language files (`it.json`, `en.json`, `de.json`). Total: 934 keys per language.
 
 ## [1.7.8] - 2026-05-10
 
 ### Added
-- **Trasferisci a Ricette dalla chat** — Quando la chat con Gemini Chef genera una ricetta, compare il bottone "📥 Trasferisci a Ricette". Premendolo, Gemini converte il testo in JSON strutturato completo (titolo, pasti, ingredienti, passi), il backend arricchisce ogni ingrediente con product_id e location via fuzzy-match (identico a generateRecipe), la ricetta viene salvata in archivio e si apre direttamente nella sezione Ricette con tutti i pulsanti "Usa" e la modalità cottura completa.
-- **Bottone "Apri la ricetta"** — Dopo un trasferimento riuscito, il bottone "📥 Trasferisci a Ricette" si trasforma direttamente in "📖 Apri la ricetta" (stesso elemento DOM), evitando problemi di sovrapposizione.
-- **Crea una ricetta per ingrediente** — Nel pannello azione di ogni alimento in inventario compare il bottone "👨‍🍳 Crea una ricetta con questo" (teal, larghezza piena). Premendolo, Gemini genera una ricetta italiana usando quell'alimento come protagonista (stesso pipeline di chatToRecipe: arricchimento fuzzy-match inventario, meal=null, 8192 token max).
-- **meal non auto-categorizzato** — Le ricette generate da chat o da ingrediente non vengono più auto-categorizzate (meal rimane null); il tag pasto nell'UI viene mostrato solo se valorizzato.
+- **Transfer to Recipes from chat** — When the Gemini Chef chat generates a recipe, a "📥 Transfer to Recipes" button appears. Pressing it triggers Gemini to convert the chat text into a complete structured JSON (title, meal, ingredients, steps); the backend enriches each ingredient with `product_id` and `location` via fuzzy-match (identical to `generateRecipe`); the recipe is saved and opens directly in the Recipes section with all "Use" buttons and full cooking mode.
+- **"Open recipe" button** — After a successful transfer, the "📥 Transfer to Recipes" button transforms into "📖 Open recipe" (same DOM element), preventing overlap.
+- **Create a recipe from an ingredient** — In the action panel of every inventory item, a "👨‍🍳 Create a recipe with this" button appears (teal, full width). Pressing it, Gemini generates a recipe using that ingredient as the star (same pipeline as `chatToRecipe`: inventory fuzzy-match enrichment, `meal=null`, 8192 token max).
+- **Meal not auto-categorized** — Recipes generated from chat or from an ingredient are no longer auto-categorized (`meal` remains null); the meal tag in the UI is only shown when explicitly set.
 
 ### Fixed
-- **Smart shopping: falso positivo "quasi finito"** — Se un prodotto in grammi/ml era quasi esaurito (es. Burro 30g = 12%) ma lo stesso prodotto era disponibile anche come confezione (Burro 1 conf = 99%), il sistema segnalava ugualmente "sta finendo". Ora verifica se la famiglia `shopping_name` ha scorte da altri prodotti: se sì, l'alert viene soppresso. (Esempio: 30g di Burro + 1 conf di Burro → nessun alert.)
-- **Traduzioni JSON corrotte** — La sezione `action` era duplicata nei file `de.json`, `en.json` e `it.json`, causando errori di parsing che bloccavano la CI/CD. Rimossa la sezione spuria.
+- **Smart shopping: false "running low" alert** — If a product in grams/ml was nearly exhausted (e.g. Butter 30 g = 12%) but the same product was also available as a sealed package (Butter 1 pack = 99%), the system still flagged "running low". Now checks whether the `shopping_name` family has stock from other products; if so, the alert is suppressed.
+- **Corrupted translation JSON** — The `action` section was duplicated in `de.json`, `en.json`, and `it.json`, causing JSON parse errors that blocked CI/CD. The spurious duplicate section has been removed.
 
 ## [1.7.7] - 2026-05-10
 
 ### Fixed
-- **Smart shopping family suppression** — La logica `recentlyExhausted` (prodotti terminati < 14gg) bypassava erroneamente anche la suppression per `shopping_name` family, causando falsi positivi: prodotti come Yaourt Vanille apparivano come urgenti anche con 2kg di Yogurt in stock, Salame Paesano con 1kg di Affettato in stock, Gran bauletto rustico con più pani in stock. Ora `recentlyExhausted` bypassa solo il check token-based (match lasco), mentre la family suppression per `shopping_name` si applica sempre.
-- **Shelf life pre-warming nel cron** — Il cron ora chiama `prewarmShelfLifeCache()` ogni 5 minuti, precaricando via Gemini AI la shelf life degli item aperti in inventario (max 5 item per ciclo) prima che l'utente li visualizzi. Questo elimina il delay percepibile al primo click su "Aperto il...".
+- **Smart shopping family suppression** — The `recentlyExhausted` logic (products finished < 14 days ago) was incorrectly bypassing the `shopping_name` family suppression, causing false positives: products like Vanilla Yogurt appeared urgent even with 2 kg of Yogurt in stock. `recentlyExhausted` now only bypasses the token-based loose match; family suppression by `shopping_name` always applies.
+- **Shelf-life pre-warming in cron** — The cron now calls `prewarmShelfLifeCache()` every 5 minutes, pre-loading via Gemini AI the shelf life of opened inventory items (max 5 items per cycle) before the user views them. This eliminates the noticeable delay on first click of "Opened on…".
 
 ## [1.7.6] - 2026-05-10
 
 ### Fixed
-- **`shopping_name` troncato (Piadina)** — Il prodotto "Piadine medie" aveva `shopping_name='Pi'` (troncato), non veniva aggruppato correttamente nella famiglia. Corretto in `Piadina`.
-- **Family merges DB** — Grana Padano ora sotto `Formaggio` (era `Grana` singleton), Prosciutto cotto ora sotto `Affettato`, Panna acida ora sotto `Panna`.
-- **`daily_rate` su periodo effettivo** — Il tasso di consumo giornaliero usava `first_in → now` come finestra, diluendo il rate con periodi in cui il prodotto era già esaurito (es. aglio esaurito a 34gg veniva calcolato su 60+). Ora usa `first_in → last_activity` (ultimo acquisto o ultimo uso), più preciso per le previsioni di riordino.
-- **Anomaly dismiss key stabile** — La chiave di dismiss usava `product_id + round(expected)` che cambiava ad ogni nuova transazione, causando la ricomparsa delle anomalie già chiuse. Ora usa `product_id + direction` (phantom/missing/untracked) — stabile finché la direzione non cambia.
-- **Smart shopping: prodotti esauriti < 14 giorni** — Prodotti terminati negli ultimi 14 giorni non vengono più soppressi dal check token-coverage o shopping_name-family: se li hai appena finiti, è probabile tu voglia ricomprarli indipendentemente dalla presenza di equivalenti in stock.
-- **Chat pruning** — `chatSave()` ora esegue `DELETE` dei messaggi oltre i 200 più recenti dopo ogni salvataggio, evitando crescita illimitata della tabella `chat_messages`.
-- **`getStats()` query consolidate** — Le 5 query separate (COUNT products, SUM inventory, COUNT locations, COUNT recent_in, COUNT recent_out) sono ora una sola query con subselect, riducendo i round-trip SQLite da 5 a 1.
-- **Bring! cleanup rate-limiting** — Aggiunto `usleep(300ms)` tra le rimozioni multiple per evitare di sovraccaricare l'API Bring! in burst.
-- **Indici compositi su `transactions`** — Aggiunti `idx_transactions_type_date(type, created_at)` (per `getStats`) e `idx_transactions_pid_type_undone(product_id, type, undone)` (per `smartShopping`), con migration automatica per DB esistenti.
+- **`shopping_name` truncated (Piadina)** — The product "Piadine medie" had `shopping_name='Pi'` (truncated), preventing it from grouping correctly in its family. Fixed to `Piadina`.
+- **Family merges in DB** — Grana Padano now under `Formaggio` (was a `Grana` singleton), Prosciutto cotto now under `Affettato`, Panna acida now under `Panna`.
+- **`daily_rate` over the actual active period** — The daily consumption rate was using `first_in → now` as the window, diluting the rate with periods when the product was already exhausted (e.g. garlic exhausted at day 34 was calculated over 60+ days). Now uses `first_in → last_activity` (last purchase or last use), giving more accurate reorder predictions.
+- **Stable anomaly dismiss key** — The dismiss key was using `product_id + round(expected)`, which changed with every new transaction, causing already-dismissed anomalies to reappear. Now uses `product_id + direction` (phantom/missing/untracked) — stable as long as the direction does not change.
+- **Smart shopping: products exhausted < 14 days ago** — Products finished within the last 14 days are no longer suppressed by the token-coverage check or the shopping_name family check: if you just ran out, you probably want to restock regardless of equivalent stock on hand.
+- **Chat pruning** — `chatSave()` now deletes messages beyond the 200 most recent after each save, preventing unbounded growth of the `chat_messages` table.
 
-### Security
-- **CSRF protection** — Le action di scrittura (inventory_add, bring_add, product_save, ecc.) richiedono ora `X-EverShelf-Request: 1` oppure `Content-Type: application/json`. Il frontend `api()` invia sempre il header su POST. Questo previene attacchi CSRF cross-site tramite form HTML.
 
 ## [1.7.5] - 2026-05-10
 

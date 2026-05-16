@@ -73,7 +73,7 @@ Shown as an inline AI badge next to the expiry estimate. Does not block the form
 
 ### Recipe Generation
 
-Tap **🍳 Ricette** → **Genera ricetta** to get a recipe using:
+Tap **🍳 Recipes** → **Generate Recipe** to get a recipe using:
 - Ingredients about to expire (prioritised)
 - What's currently in your pantry
 - Your language preference
