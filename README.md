@@ -32,6 +32,8 @@
 [![GitHub Discussions](https://img.shields.io/github/discussions/dadaloop82/EverShelf)](https://github.com/dadaloop82/EverShelf/discussions)
 [![CI](https://github.com/dadaloop82/EverShelf/actions/workflows/ci.yml/badge.svg)](https://github.com/dadaloop82/EverShelf/actions/workflows/ci.yml)
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/J3J01ZNETZ)
+
 ---
 
 ## ✨ Features
