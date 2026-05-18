@@ -755,7 +755,7 @@
       "label": "🌙 Tema",
       "off": "☀️ Chiaro",
       "on": "🌙 Scuro",
-      "auto": "🔄 Automatico (sistema)"
+      "auto": "🔄 Automatico (orario)"
     },
     "zerowaste": {
       "card_title": "♻️ Suggerimenti zero-waste",
@@ -801,7 +801,8 @@
       "year_label": "Anno {year}",
       "currency_title": "Valuta",
       "currency_hint": "La valuta usata per tutti i costi e i prezzi nell'app."
-    }
+    },
+    "tab_general": "Generali"
   },
   "expiry": {
     "today": "OGGI",

@@ -755,7 +755,7 @@
       "label": "🌙 Theme",
       "off": "☀️ Light",
       "on": "🌙 Dark",
-      "auto": "🔄 Auto (system)"
+      "auto": "🔄 Automatic (time of day)"
     },
     "zerowaste": {
       "card_title": "♻️ Zero-waste tips",
@@ -801,7 +801,8 @@
       "year_label": "Year {year}",
       "currency_title": "Currency",
       "currency_hint": "The currency used for all costs and prices in the app."
-    }
+    },
+    "tab_general": "General"
   },
   "expiry": {
     "today": "TODAY",

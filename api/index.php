@@ -163,7 +163,7 @@ if (($_GET['action'] ?? '') === 'gemini_usage') {
     $year   = date('Y');
     $cur    = $aiData[$month] ?? ['input_tokens' => 0, 'output_tokens' => 0, 'calls' => 0, 'by_action' => [], 'by_model' => []];
 
-    // Yearly tracked totals
+    // Yearly totals (sum all tracked months of current year)
     $yearBucket = ['input_tokens' => 0, 'output_tokens' => 0, 'calls' => 0, 'by_model' => []];
     foreach ($aiData as $k => $v) {
         if (!str_starts_with($k, $year)) continue;
@@ -178,55 +178,15 @@ if (($_GET['action'] ?? '') === 'gemini_usage') {
         }
     }
 
-    // ── Estimate from persistent cache (complements tracked data) ────────────
-    // Token estimates per function (realistic averages based on actual prompt sizes):
-    //   price_batch  : system + product list prompt ~700 in, structured JSON ~250 out
-    //   shelf_life   : product + context + rules ~650 in, days + explanation ~120 out
-    //   category     : product name only ~280 in, single word ~40 out
-    //   food_facts   : full stats request ~750 in, rich JSON ~500 out
-    //   shopping_name: simple normalization ~250 in, name string ~40 out
-    // Note: uncacheable calls (recipe, chat, ocr, identify, recipe_ingredient, etc.)
-    //       will be tracked going forward via ai_usage.json
-    $monthStart = mktime(0, 0, 0, (int)date('m'), 1, (int)date('Y'));
-    $yearStart  = mktime(0, 0, 0, 1, 1, (int)date('Y'));
-
-    $estMonthIn = 0; $estMonthOut = 0; $estMonthCalls = 0;
-    $estYearIn  = 0; $estYearOut  = 0; $estYearCalls  = 0;
-
-    // Price cache
+    // ── Cache item counts (for caches card) ──────────────────────────────────
     $priceCache = file_exists(PRICE_CACHE_PATH)
         ? (json_decode(file_get_contents(PRICE_CACHE_PATH), true) ?: []) : [];
-    foreach ($priceCache as $v) {
-        if (!is_array($v) || !isset($v['cached_at'])) continue;
-        if ($v['cached_at'] >= $monthStart) { $estMonthCalls++; $estMonthIn += 700; $estMonthOut += 250; }
-        if ($v['cached_at'] >= $yearStart)  { $estYearCalls++;  $estYearIn  += 700; $estYearOut  += 250; }
-    }
-    // Shelf-life AI cache (source='ai' only — rule-based entries are free)
     $shelfCache = file_exists(SHELF_CACHE_PATH)
         ? (json_decode(file_get_contents(SHELF_CACHE_PATH), true) ?: []) : [];
-    foreach ($shelfCache as $v) {
-        if (!is_array($v) || ($v['source'] ?? '') !== 'ai') continue;
-        if (($v['ts'] ?? 0) >= $monthStart) { $estMonthCalls++; $estMonthIn += 650; $estMonthOut += 120; }
-        if (($v['ts'] ?? 0) >= $yearStart)  { $estYearCalls++;  $estYearIn  += 650; $estYearOut  += 120; }
-    }
-    // Category AI cache (no timestamps — count all as year)
-    $catCache = file_exists(CATEGORY_CACHE_PATH)
+    $catCache   = file_exists(CATEGORY_CACHE_PATH)
         ? (json_decode(file_get_contents(CATEGORY_CACHE_PATH), true) ?: []) : [];
-    $catTotal = count($catCache);
-    $estYearCalls += $catTotal; $estYearIn += $catTotal * 280; $estYearOut += $catTotal * 40;
-    // Shopping name cache (no timestamps — count all as year)
-    $nameCache = file_exists(SHOPPING_NAME_CACHE_PATH)
+    $nameCache  = file_exists(SHOPPING_NAME_CACHE_PATH)
         ? (json_decode(file_get_contents(SHOPPING_NAME_CACHE_PATH), true) ?: []) : [];
-    $nameTotal = count($nameCache);
-    $estYearCalls += $nameTotal; $estYearIn += $nameTotal * 250; $estYearOut += $nameTotal * 40;
-
-    // Merge: tracked data is authoritative; estimate fills the gap before tracking started
-    $monthIn     = max((int)$cur['input_tokens'],  $estMonthIn);
-    $monthOut    = max((int)$cur['output_tokens'], $estMonthOut);
-    $monthCalls  = max((int)$cur['calls'],         $estMonthCalls);
-    $yearIn      = max((int)$yearBucket['input_tokens'],  $estYearIn);
-    $yearOut     = max((int)$yearBucket['output_tokens'], $estYearOut);
-    $yearCalls   = max((int)$yearBucket['calls'],         $estYearCalls);
 
     // ── DB stats ──────────────────────────────────────────────────────────────
     $dbStats = [];
@@ -270,22 +230,22 @@ if (($_GET['action'] ?? '') === 'gemini_usage') {
         'month' => $month,
         'year'  => $year,
 
-        // Current month (tracked + estimated from cache)
+        // Current month (from ai_usage.json)
         'month_stats' => [
-            'calls'        => $monthCalls,
-            'input_tokens' => $monthIn,
-            'output_tokens'=> $monthOut,
-            'cost_usd'     => $calcCost($monthIn, $monthOut),
+            'calls'        => (int)$cur['calls'],
+            'input_tokens' => (int)$cur['input_tokens'],
+            'output_tokens'=> (int)$cur['output_tokens'],
+            'cost_usd'     => $calcCost((int)$cur['input_tokens'], (int)$cur['output_tokens']),
             'by_action'    => $cur['by_action'] ?? [],
             'by_model'     => $cur['by_model']  ?? [],
         ],
 
-        // Current year (tracked + estimated from cache)
+        // Current year (from ai_usage.json — all months summed)
         'year_stats' => [
-            'calls'        => $yearCalls,
-            'input_tokens' => $yearIn,
-            'output_tokens'=> $yearOut,
-            'cost_usd'     => $calcCost($yearIn, $yearOut),
+            'calls'        => (int)$yearBucket['calls'],
+            'input_tokens' => (int)$yearBucket['input_tokens'],
+            'output_tokens'=> (int)$yearBucket['output_tokens'],
+            'cost_usd'     => $calcCost((int)$yearBucket['input_tokens'], (int)$yearBucket['output_tokens']),
         ],
 
         // DB activity
@@ -298,8 +258,8 @@ if (($_GET['action'] ?? '') === 'gemini_usage') {
         'caches' => [
             'price'    => count($priceCache),
             'shelf'    => count($shelfCache),
-            'category' => $catTotal,
-            'names'    => $nameTotal,
+            'category' => count($catCache),
+            'names'    => count($nameCache),
             'foodfacts'=> count(file_exists(FOODFACTS_CACHE_PATH)
                 ? (json_decode(file_get_contents(FOODFACTS_CACHE_PATH), true) ?: []) : []),
         ],

@@ -1052,7 +1052,8 @@ if (!_SUPPORTED_LANGS[_currentLang]) _currentLang = 'en';
     try {
         const s = JSON.parse(localStorage.getItem('evershelf_settings') || '{}');
         const mode = s.dark_mode || 'auto';
-        const dark = mode === 'on' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const h = new Date().getHours();
+        const dark = mode === 'on' || (mode === 'auto' && (h >= 20 || h < 7));
         document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     } catch(e) {}
 })();
@@ -1176,7 +1177,9 @@ function _applyTheme() {
     } else if (mode === 'off') {
         isDark = false;
     } else {
-        isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        // auto: dark from 20:00 to 07:00 (time-based, not system preference)
+        const h = new Date().getHours();
+        isDark = h >= 20 || h < 7;
     }
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 }
@@ -1189,10 +1192,10 @@ function _setThemeMode(mode) {
 }
 
 // Listen to system theme changes (for 'auto' mode)
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    const s = getSettings();
-    if ((s.dark_mode || 'auto') === 'auto') _applyTheme();
-});
+// Re-evaluate auto theme every 5 minutes (catches 20:00 dark / 07:00 light transitions)
+setInterval(() => {
+    if ((getSettings().dark_mode || 'auto') === 'auto') _applyTheme();
+}, 5 * 60 * 1000);
 
 // ===== EXPORT INVENTORY =====
 function exportInventory(format) {
@@ -2343,12 +2346,6 @@ async function _renderInfoTab() {
         // ── System card ──────────────────────────────────────────────────────
         if (sysEl) {
             const db = d.db || {};
-            const nowTs = Math.floor(Date.now()/1000);
-            const bringDays  = d.bring_expires_ts ? Math.round((d.bring_expires_ts - nowTs)/86400) : null;
-            const bringColor = bringDays !== null && bringDays <= 3 ? '#dc2626' : '';
-            const bringLabel = bringDays === null ? '—'
-                : bringDays <= 0 ? t('settings.info.bring_expired')
-                : t('settings.info.bring_days').replace('{n}', bringDays);
             const lvlColors = {DEBUG:'#1e40af//#dbeafe', INFO:'#15803d//#dcfce7', WARN:'#854d0e//#fef9c3', ERROR:'#991b1b//#fee2e2'};
             const [lvlFg, lvlBg] = (lvlColors[d.log_level] || '#64748b//#f1f5f9').split('//');
 
@@ -2366,10 +2363,6 @@ async function _renderInfoTab() {
                     <tr style="border-top:1px solid var(--border-color,#e2e8f0)">
                         <td style="padding:7px 0;color:var(--text-secondary)">${t('settings.info.last_backup')}</td>
                         <td style="padding:7px 0;font-weight:600;text-align:right">${d.last_backup_ts ? fmtDate(d.last_backup_ts)+' · '+fmtBytes(d.last_backup_bytes) : '—'}</td>
-                    </tr>
-                    <tr style="border-top:1px solid var(--border-color,#e2e8f0)">
-                        <td style="padding:7px 0;color:var(--text-secondary)">Bring!</td>
-                        <td style="padding:7px 0;font-weight:600;text-align:right;color:${bringColor||'inherit'}">${bringLabel}</td>
                     </tr>
                 </table>`;
         }
