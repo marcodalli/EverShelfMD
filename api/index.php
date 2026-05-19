@@ -510,8 +510,29 @@ if (($_GET['action'] ?? '') === 'health_check') {
     // Se non configurata, l'utente ha scelto di non usarla → nessun check, nessun warning.
     $bringEmail    = $envGet('BRING_EMAIL');
     $bringPassword = $envGet('BRING_PASSWORD');
-    $bringEnabled  = !empty($bringEmail) && !empty($bringPassword);
-    // If Bring! not configured, skip entirely — not a warning, it's a user choice
+    $shoppingMode  = $envGet('SHOPPING_MODE') ?: 'native';
+    $bringEnabled  = !empty($bringEmail) && !empty($bringPassword) && $shoppingMode === 'bring';
+    if ($bringEnabled) {
+        $checks['bring_credentials'] = ['ok' => true, 'optional' => true];
+        // Token file is created automatically on first shopping list access — not an error if missing
+        $bringTokenFile = $dataDir . '/bring_token.json';
+        $bringTokenOk   = true; // default: fine (missing = not yet obtained, will auto-create)
+        $bringTokenHint = null;
+        if (file_exists($bringTokenFile)) {
+            $bringData    = @json_decode(@file_get_contents($bringTokenFile), true);
+            $hasToken     = !empty($bringData['access_token'] ?? ($bringData['accessToken'] ?? ''));
+            $expired      = isset($bringData['expires']) && $bringData['expires'] < time();
+            if (!$hasToken && !$expired) {
+                // File exists but token field missing — corrupt
+                $bringTokenOk   = false;
+                $bringTokenHint = 'Bring! token file present but appears invalid — delete data/bring_token.json to regenerate';
+            }
+            // Expired token is OK: it will be refreshed automatically
+        }
+        // Missing token file = first launch, will be created automatically → no warning
+        $checks['bring_token'] = ['ok' => $bringTokenOk, 'optional' => true, 'hint' => $bringTokenHint];
+    }
+    // If Bring! not configured or SHOPPING_MODE != bring, skip entirely — not a warning, it is a deliberate user choice
 
     // ── 12. TTS — solo se TTS_ENABLED ────────────────────────────────────────
     if ($envGet('TTS_ENABLED') === 'true') {
