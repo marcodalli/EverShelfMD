@@ -4551,7 +4551,7 @@ function isSuspiciousQty(qty, unit) {
 function isSuspiciousDefaultQty(defaultQty, unit, packageUnit) {
     const n = parseFloat(defaultQty);
     if (!n || n <= 0) return false;
-    const checkUnit = (unit === 'conf' && packageUnit) ? packageUnit : unit;
+    const checkUnit = ((unit === 'conf' || unit === 'pz') && packageUnit) ? packageUnit : unit;
     const th = QTY_THRESHOLDS[checkUnit] || QTY_THRESHOLDS['pz'];
     return n > th.max;
 }
