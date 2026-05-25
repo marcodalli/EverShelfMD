@@ -137,7 +137,16 @@ Connect your pantry to your smart home in minutes — no YAML, no manual sensor 
 - **Mobile-first design** — Optimized for phones, works on tablets and desktop
 - **Installable** — Add to home screen for a native app experience
 - **Multi-device** — All user data (shopping tags, pinned items, location preferences, scan history) is stored server-side in SQLite and shared across every device on the same instance; no data is siloed in a single browser's localStorage
-
+### 📶 Offline Mode
+- **Automatic detection** — Full-screen overlay appears immediately on network loss; shows a "Continue offline" button after 3 s, and auto-enters offline mode after 8 s
+- **Local inventory cache** — Inventory is synced to `localStorage` at every startup and on each successful API call; the offline view always reflects the last known state
+- **Write queue** — Add, use, update and delete operations performed while offline are queued locally and synced to the server automatically on reconnect (including after a page refresh)
+- **Optimistic UI** — Queued writes are applied immediately to the local cache so the interface stays responsive
+- **Offline-computed stats** — Expiring and expired items are derived client-side from the cache; dashboard stat cards show real counts instead of zeros
+- **AI/network sections hidden** — Anti-waste chart, nutrition analysis, recipe generator, price fetching, and Gemini chat are hidden in offline mode; the inventory, history, and manually-managed shopping list remain fully functional
+- **Broken image fallback** — External product images (Open Food Facts, etc.) that fail to load are replaced with a neutral grey placeholder, keeping the layout intact
+- **Startup recovery** — If the page is refreshed while operations are queued, they are detected and synced automatically on the next successful startup
+- **Buffered error reporting** — `remoteLog` and `reportError` calls made while offline are stored locally and flushed to the server (and to GitHub issues) when the connection is restored
 ### ⚖️ Smart Scale Integration (Add-on)
 - **Bluetooth gateway** — Connects a BLE smart scale to EverShelf via local WebSocket
 - **SSE relay** — Server-side relay avoids mixed-content (HTTPS→WS) issues

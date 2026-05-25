@@ -64,7 +64,7 @@
         <div id="preloader-warnings" class="preloader-warnings" style="display:none"></div>
         <div id="preloader-error-msg" class="preloader-error-msg" style="display:none"></div>
         <button id="preloader-retry-btn" class="preloader-retry-btn" style="display:none" onclick="_startupRetry()">🔄 <span data-i18n="startup.retry">Riprova</span></button>
-        <span class="app-preloader-version" id="preloader-version">v1.7.23</span>
+        <span class="app-preloader-version" id="preloader-version">v1.7.25</span>
     </div>
 </div>
 
@@ -77,7 +77,7 @@
         <!-- Title — left-aligned; grows to fill space -->
         <div class="header-title-wrap">
             <h1 class="header-title" onclick="showPage('dashboard')">
-                <img src="assets/img/logo/logo_icon.png" alt="" class="header-logo-icon" aria-hidden="true" /><span data-i18n="nav.title">EverShelf</span><span class="header-version">v1.7.23</span>
+                <img src="assets/img/logo/logo_icon.png" alt="" class="header-logo-icon" aria-hidden="true" /><span data-i18n="nav.title">EverShelf</span><span class="header-version">v1.7.25</span>
             </h1>
             <!-- Update badge — shown alongside title, never replaces it -->
             <span class="header-update-badge" id="header-update-badge" style="display:none"></span>
@@ -672,7 +672,7 @@
             <h2 data-i18n="recipes.title">🍳 Ricette</h2>
         </div>
         <div class="recipe-page-container">
-            <button class="btn btn-large btn-success full-width" onclick="openRecipeDialog()" data-i18n="recipes.generate">
+            <button class="btn btn-large btn-success full-width recipe-generate-btn" onclick="openRecipeDialog()" data-i18n="recipes.generate">
                 ✨ Genera nuova ricetta
             </button>
             <div id="recipe-archive" class="recipe-archive"></div>
@@ -1872,6 +1872,17 @@
         <button class="screensaver-shortcut-btn" id="screensaver-scan-btn" title="Scansiona prodotto (tieni premuto per modalità spesa)">
             📷
         </button>
+    </div>
+</div>
+
+<!-- ===== NETWORK ERROR OVERLAY ===== -->
+<div id="network-error-overlay" style="display:none" aria-live="assertive" role="alert">
+    <div class="net-error-body">
+        <div class="net-error-icon" id="net-error-icon">📡</div>
+        <div class="net-error-title" id="net-error-title" data-i18n="error.offline_title">Nessuna connessione</div>
+        <div class="net-error-subtitle" id="net-error-subtitle" data-i18n="error.offline_subtitle">L'app non riesce a raggiungere il server. Verifica la connessione Wi-Fi.</div>
+        <div class="net-error-status" id="net-error-status"></div>
+        <button class="net-error-continue-btn" id="net-error-continue-btn" onclick="_enterOfflineMode()" data-i18n="error.offline_continue" style="display:none">Continua in modalità offline</button>
     </div>
 </div>
 

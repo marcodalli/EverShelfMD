@@ -596,12 +596,36 @@ body {
 }
 .offline-banner-retry:hover { background: rgba(255,255,255,0.38); }
 
+/* Pulsing dot shown in the banner while the offline cache is being read */
+.offline-banner-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #f87171;
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: offline-dot-pulse 1.1s ease-in-out infinite;
+}
+@keyframes offline-dot-pulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50%       { opacity: 1;   transform: scale(1.15); }
+}
+
 /* When server is offline, block interactions with the main content */
-body.server-offline .app-content {
+body.server-offline:not(.offline-mode) .app-content {
     opacity: 0.4;
     pointer-events: none;
     user-select: none;
     transition: opacity 0.3s;
+}
+/* In offline-mode the app is usable; just a subtle left-border indicator */
+body.offline-mode .app-content {
+    border-left: 3px solid rgba(239, 68, 68, 0.45);
+}
+/* Hide the "Retry" button in the banner when in offline mode — use the Continue button instead */
+body.offline-mode .offline-banner-retry {
+    display: none;
 }
 body.server-offline .bottom-nav {
     opacity: 0.4;
@@ -7655,3 +7679,117 @@ body.cooking-mode-active .app-header {
 
 /* ── Appliance remove active ── */
 [data-theme="dark"] .appliance-item .appliance-remove:active { background: #2a0808; }
+
+/* ===== NETWORK ERROR OVERLAY ===== */
+#network-error-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 8, 20, 0.97);
+    z-index: 300000; /* highest: above screensaver(10000), cooking(99999), preloader(200000) */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+}
+#network-error-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.net-error-body {
+    text-align: center;
+    padding: 2.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.net-error-icon {
+    font-size: 5.5rem;
+    line-height: 1;
+    margin-bottom: 1.75rem;
+    animation: net-pulse 2.2s ease-in-out infinite;
+    display: block;
+    filter: drop-shadow(0 0 32px rgba(248, 113, 113, 0.35));
+}
+#network-error-overlay.restored .net-error-icon {
+    animation: none;
+    filter: drop-shadow(0 0 32px rgba(74, 222, 128, 0.45));
+}
+#network-error-overlay.checking .net-error-icon {
+    animation: net-spin 1.2s linear infinite;
+}
+@keyframes net-pulse {
+    0%, 100% { opacity: 0.45; transform: scale(0.92); }
+    50%       { opacity: 1;    transform: scale(1.06); }
+}
+@keyframes net-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+.net-error-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #f87171;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.02em;
+    transition: color 0.4s;
+}
+#network-error-overlay.restored .net-error-title {
+    color: #4ade80;
+}
+.net-error-subtitle {
+    font-size: 1.1rem;
+    color: #94a3b8;
+    max-width: 420px;
+    line-height: 1.6;
+    margin: 0 auto;
+}
+.net-error-status {
+    margin-top: 1.5rem;
+    font-size: 0.88rem;
+    color: #475569;
+    min-height: 1.3em;
+    letter-spacing: 0.01em;
+}
+/* "Continue in offline mode" button — appears after 3 s */
+.net-error-continue-btn {
+    margin-top: 2.2rem;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.22);
+    color: #94a3b8;
+    border-radius: 10px;
+    padding: 0.7rem 1.6rem;
+    font-size: 0.92rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, transform 0.3s, opacity 0.3s;
+    opacity: 0;
+    transform: translateY(8px);
+}
+.net-error-continue-btn.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.net-error-continue-btn:hover {
+    background: rgba(255,255,255,0.16);
+    color: #e2e8f0;
+}
+
+/* ─── Offline mode: hide AI and network-dependent UI ────────────────────────
+   Sections that require a live server response or AI are hidden so the user
+   isn't confronted with empty/broken widgets while offline.               */
+body.offline-mode #waste-chart-section,
+body.offline-mode #nutrition-section,
+body.offline-mode #quick-recipe-bar,
+body.offline-mode .header-gemini-btn,
+body.offline-mode #btn-suggest,
+body.offline-mode #btn-fetch-prices,
+body.offline-mode .recipe-generate-btn {
+    display: none !important;
+}
+/* Smart-shopping AI section: show as disabled rather than disappearing entirely */
+body.offline-mode #smart-shopping {
+    opacity: 0.45;
+    pointer-events: none;
+    filter: grayscale(0.6);
+}

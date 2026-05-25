@@ -13,6 +13,8 @@
 //  2. reportError() — immediate single POST → report_error endpoint → GitHub Issue
 
 const _remoteLogBuffer = [];
+const _OFFLINE_LOGS_KEY   = '_evershelf_offline_logs';  // buffered log msgs while offline
+const _OFFLINE_ERRORS_KEY = '_evershelf_offline_errors'; // buffered error reports while offline
 let _remoteLogTimer = null;
 const _origConsoleError = console.error.bind(console);
 const _origConsoleWarn = console.warn.bind(console);
@@ -33,11 +35,25 @@ function flushRemoteLog() {
     _remoteLogTimer = null;
     if (_remoteLogBuffer.length === 0) return;
     const msgs = _remoteLogBuffer.splice(0);
+    // If offline, buffer for flush on reconnect instead of losing them
+    const isOfflineNow = (typeof _serverOffline !== 'undefined' && _serverOffline) ||
+                         (typeof _networkDown    !== 'undefined' && _networkDown)    ||
+                         (typeof _offlineMode    !== 'undefined' && _offlineMode);
+    if (isOfflineNow) { _bufferOfflineLogs(msgs); return; }
     fetch(`api/index.php?action=client_log`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: msgs })
-    }).catch(() => {});
+    }).catch(() => { _bufferOfflineLogs(msgs); }); // store if request itself fails
+}
+
+function _bufferOfflineLogs(msgs) {
+    try {
+        const pending = JSON.parse(localStorage.getItem(_OFFLINE_LOGS_KEY) || '[]');
+        pending.push(...msgs);
+        if (pending.length > 500) pending.splice(0, pending.length - 500);
+        localStorage.setItem(_OFFLINE_LOGS_KEY, JSON.stringify(pending));
+    } catch(e) {}
 }
 
 // Override console.error and console.warn to also send remotely
@@ -65,20 +81,47 @@ function reportError(payload) {
         version:    document.querySelector('.header-version')?.textContent?.trim() || '',
         url:        location.href,
         user_agent: navigator.userAgent,
+        ts:         new Date().toISOString(),
     }, payload);
+
+    // When offline, buffer for replay when reconnected (→ GitHub issue on restore)
+    const isOfflineNow = (typeof _serverOffline !== 'undefined' && _serverOffline) ||
+                         (typeof _networkDown    !== 'undefined' && _networkDown)    ||
+                         (typeof _offlineMode    !== 'undefined' && _offlineMode);
+    if (isOfflineNow) { _bufferOfflineError(body); return; }
 
     fetch('api/index.php?action=report_error', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
-    }).catch(() => {}); // fire-and-forget; never throw from error handler
+    }).catch(() => { _bufferOfflineError(body); }); // store if request itself fails
     // Note: the server will also skip issue creation if this version is not the latest.
+}
+
+function _bufferOfflineError(body) {
+    try {
+        const pending = JSON.parse(localStorage.getItem(_OFFLINE_ERRORS_KEY) || '[]');
+        pending.push(body);
+        if (pending.length > 50) pending.splice(0, pending.length - 50);
+        localStorage.setItem(_OFFLINE_ERRORS_KEY, JSON.stringify(pending));
+    } catch(e) {}
 }
 
 // ── Webapp update notification ───────────────────────────────────────────────
 // Checks both the deployed webapp version and the latest GitHub release.
 // Fires on tab focus and every 5 minutes.
 const _loadedVersion = (document.querySelector('.header-version')?.textContent?.trim() || '').replace(/^v/, '');
+
+// ── Broken image fallback ─────────────────────────────────────────────────────
+// External product images (Open Food Facts, etc.) are unavailable when offline.
+// Replace any broken <img> with a neutral grey placeholder so the layout stays intact.
+document.addEventListener('error', (e) => {
+    if (e.target.tagName !== 'IMG' || e.target.dataset.offlineErr) return;
+    e.target.dataset.offlineErr = '1';
+    // 60x60 grey placeholder SVG with a '?' glyph
+    e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Crect width='60' height='60' rx='8' fill='%231e293b'/%3E%3Ctext x='30' y='38' text-anchor='middle' fill='%2364748b' font-size='24' font-family='sans-serif'%3E%3F%3C/text%3E%3C/svg%3E";
+    e.target.style.opacity = '0.45';
+}, true);
 
 // ── Gemini AI availability ────────────────────────────────────────────────────
 // Set to true in _initApp / syncSettingsFromDB once server confirms key is set.
@@ -133,6 +176,17 @@ function _applyDemoModeUI() {
     }
 }
 
+function _semverGt(a, b) {
+    // Returns true if version string a is strictly greater than b (e.g. "1.7.25" > "1.7.23")
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const na = pa[i] || 0, nb = pb[i] || 0;
+        if (na !== nb) return na > nb;
+    }
+    return false;
+}
+
 function _checkWebappUpdate() {
     const STORAGE_KEY  = '_evershelf_update_checked_at';
     const SEEN_KEY     = '_evershelf_update_seen_ts';
@@ -151,7 +205,7 @@ function _checkWebappUpdate() {
 
             // ── Check 1: server has a newer version deployed since this page loaded ──
             const serverVer     = (data.webapp_version || '').replace(/^v/, '');
-            const deployChanged = serverVer && _loadedVersion && serverVer !== _loadedVersion;
+            const deployChanged = serverVer && _loadedVersion && _semverGt(serverVer, _loadedVersion);
 
             // ── Check 2: a newer GitHub release not yet acknowledged ──
             const publishedAt  = data.published_at || '';
@@ -159,7 +213,7 @@ function _checkWebappUpdate() {
             const latestTag    = (data.latest_tag || '').replace(/^v/, '');
             const releaseNewer = publishedAt && publishedAt !== seenTs &&
                                  /^\d+\.\d+/.test(latestTag) &&
-                                 _loadedVersion && latestTag !== _loadedVersion;
+                                 _loadedVersion && _semverGt(latestTag, _loadedVersion);
 
             if (!deployChanged && !releaseNewer) return;
 
@@ -3611,6 +3665,10 @@ async function api(action, params = {}, method = 'GET', body = null, extraHeader
             return { success: true, purchase: shoppingItems, listUUID: 'demo-list', _demo: true };
         }
     }
+    // In offline mode, serve from cache / queue writes
+    if (_offlineMode) {
+        return _handleOfflineApi(action, params, body);
+    }
     let url = `${API_BASE}?action=${action}`;
     if (method === 'GET') {
         Object.entries(params).forEach(([k, v]) => {
@@ -3624,7 +3682,20 @@ async function api(action, params = {}, method = 'GET', body = null, extraHeader
     } else if (Object.keys(extraHeaders).length > 0) {
         opts.headers = { ...extraHeaders };
     }
-    const res = await fetch(url, opts);
+    let res;
+    try {
+        res = await fetch(url, opts);
+        // Server responded → reset failure counter and hide overlay if it was showing
+        if (_networkDown) _hideNetworkOverlay(true);
+        _networkFailCount = 0;
+    } catch (fetchErr) {
+        // Network-level failure (no route to host, Wi-Fi down, etc.)
+        _networkFailCount++;
+        if (_networkFailCount >= _NETWORK_FAIL_THRESHOLD) {
+            _showNetworkOverlay();
+        }
+        throw fetchErr;
+    }
     if (!res.ok) {
         remoteLog('API_ERROR', `${action} HTTP ${res.status}`);
         // Report HTTP 5xx as server errors (not 4xx which are usually user errors)
@@ -3637,6 +3708,13 @@ async function api(action, params = {}, method = 'GET', body = null, extraHeader
         }
     }
     const data = await res.json();
+    // Keep local caches fresh for offline use (only ever written when server responds successfully)
+    if (action === 'inventory_list' && data && Array.isArray(data.inventory)) {
+        _offlineCacheSet(data.inventory);
+    }
+    if (action === 'get_settings' && data && data.success !== false) {
+        _offlineCacheSetSettings(data);
+    }
     if (data && data.error) {
         remoteLog('API_FAIL', `${action}: ${data.error}`);
     }
@@ -13514,12 +13592,13 @@ function renderCookingStep() {
         }).join('');
     }
 
-    // Show ALL unused from_pantry ingredients (not filtered by step text).
-    // The AI often uses pronouns ("tagliarla", "aggiungile") instead of the ingredient
-    // name, so text-matching would miss them. Better to always show what's available.
-    const ings = (_cookingRecipe.ingredients || [])
-        .map((ing, idx) => ({ ...ing, _idx: idx }))
-        .filter(ing => ing.from_pantry && ing.product_id && ing.used !== true);
+    // Show ALL unused from_pantry ingredients only on the first step.
+    // On subsequent steps the ingredient panel stays hidden to avoid distraction.
+    const ings = _cookingStep === 0
+        ? (_cookingRecipe.ingredients || [])
+            .map((ing, idx) => ({ ...ing, _idx: idx }))
+            .filter(ing => ing.from_pantry && ing.product_id && ing.used !== true)
+        : [];
 
     const ingsEl = document.getElementById('cooking-step-ings');
     if (ings.length > 0) {
@@ -15032,6 +15111,328 @@ function saveChatHistory() {
     }).catch(() => {});
 }
 
+// ===== NETWORK ERROR OVERLAY + OFFLINE MODE =====
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+let _networkDown          = false; // true while overlay is visible
+let _networkFailCount     = 0;     // consecutive TypeError failures in api()
+let _offlineMode          = false; // true = overlay hidden, banner showing, cache reads/write queue
+let _offlineBannerTimer   = null;  // auto-enter offline mode after delay
+let _continueBtnTimer     = null;  // show "Continue offline" button after 3 s
+const _NETWORK_FAIL_THRESHOLD  = 3;
+const _OFFLINE_MODE_DELAY_MS   = 8000; // auto-enter offline mode after 8 s of overlay
+const _OFFLINE_CACHE_KEY       = '_evershelf_inv_cache';
+const _OFFLINE_SETTINGS_KEY    = '_evershelf_settings_cache';
+const _OFFLINE_QUEUE_KEY       = '_evershelf_op_queue';
+
+// ─── Local cache helpers ────────────────────────────────────────────────────
+function _offlineCacheGet() {
+    try { return JSON.parse(localStorage.getItem(_OFFLINE_CACHE_KEY)) || null; } catch { return null; }
+}
+function _offlineCacheSet(inventory) {
+    try { localStorage.setItem(_OFFLINE_CACHE_KEY, JSON.stringify(inventory)); } catch(e) {}
+}
+function _offlineCacheGetSettings() {
+    try { return JSON.parse(localStorage.getItem(_OFFLINE_SETTINGS_KEY)) || null; } catch { return null; }
+}
+function _offlineCacheSetSettings(settings) {
+    try { localStorage.setItem(_OFFLINE_SETTINGS_KEY, JSON.stringify(settings)); } catch(e) {}
+}
+function _offlineQueueGet() {
+    try { return JSON.parse(localStorage.getItem(_OFFLINE_QUEUE_KEY)) || []; } catch { return []; }
+}
+function _offlineQueueSet(q) {
+    try { localStorage.setItem(_OFFLINE_QUEUE_KEY, JSON.stringify(q)); } catch(e) {}
+}
+function _offlineQueuePush(action, body) {
+    const q = _offlineQueueGet();
+    if (q.length >= 100) q.shift(); // cap at 100
+    q.push({ action, body: body ? { ...body } : null, ts: Date.now() });
+    _offlineQueueSet(q);
+    _renderOfflineBanner();
+}
+
+// ─── Offline API handler: called by api() when _offlineMode is true ─────────
+function _handleOfflineApi(action, params, body) {
+    // ─── Reads: computed from or served directly from local cache ────────────
+    if (action === 'inventory_list') {
+        let inv = _offlineCacheGet() || [];
+        // Client-side location filter so per-location views work correctly
+        if (params && params.location) inv = inv.filter(i => i.location === params.location);
+        return { success: true, inventory: inv, _offline: true };
+    }
+    if (action === 'inventory_summary') {
+        const inv = _offlineCacheGet() || [];
+        const byLoc = {};
+        inv.forEach(item => {
+            const loc = item.location || 'other';
+            if (!byLoc[loc]) byLoc[loc] = { location: loc, product_count: 0 };
+            byLoc[loc].product_count++;
+        });
+        return { success: true, summary: Object.values(byLoc), _offline: true };
+    }
+    if (action === 'stats') {
+        const inv  = _offlineCacheGet() || [];
+        const now  = Date.now();
+        const MS   = 86400000;
+        const expiring_soon = inv.filter(i => {
+            if (!i.expiry_date || !(parseFloat(i.quantity) > 0)) return false;
+            const d = Math.floor((new Date(i.expiry_date).getTime() - now) / MS);
+            return d >= 0 && d <= 7;
+        });
+        const expired = inv.filter(i => {
+            if (!i.expiry_date || !(parseFloat(i.quantity) > 0)) return false;
+            return new Date(i.expiry_date).getTime() < now;
+        });
+        return {
+            success: true, _offline: true,
+            expiring_soon, expired,
+            // Mark is_edible:true so the banner's server-trust check produces no false positives offline.
+            // The client-side opened-shelf-life check in loadBannerAlerts() already handles genuinely
+            // expired opened items using estimateOpenedExpiryDays().
+            opened: inv.filter(i => i.opened_at && parseFloat(i.quantity) > 0).map(i => ({ ...i, is_edible: true })),
+            used_30d: 0, wasted_30d: 0, used_prev_30d: 0, wasted_prev_30d: 0,
+            used_prev_60d: 0, wasted_prev_60d: 0,
+        };
+    }
+    if (action === 'get_settings') {
+        const cached = _offlineCacheGetSettings();
+        if (cached) return { ...cached, _offline: true };
+        return { success: false, _offline: true };
+    }
+    if (action === 'get_settings') {
+        const cached = _offlineCacheGetSettings();
+        if (cached) return { ...cached, _offline: true };
+        return { success: false, _offline: true };
+    }
+    // Safe empty responses for read-only endpoints that can't be served from cache
+    const EMPTY_READS = {
+        'recent_popular_products': { success: true, recent: [], popular: [], recent_ids: [], _offline: true },
+        'consumption_predictions': { success: true, predictions: [], _offline: true },
+        'inventory_anomalies':     { success: true, anomalies: [], _offline: true },
+        'inventory_finished_items':{ success: true, finished: [], _offline: true },
+        'shopping_list':           { success: true, purchase: [], listUUID: '', _offline: true },
+        'bring_list':              { success: true, purchase: [], listUUID: '', _offline: true },
+        'smart_shopping':          { success: true, items: [], _offline: true },
+        'recipe_archive':          { success: true, recipes: [], _offline: true },
+        'food_facts':              { success: false, _offline: true },
+        'notifications':           { success: true, notifications: [], _offline: true },
+    };
+    if (EMPTY_READS[action]) return EMPTY_READS[action];
+
+    // ─── Writes: queue and apply optimistic update to cache ──────────────────
+    const QUEUEABLE = ['inventory_update', 'inventory_use', 'inventory_delete',
+                       'inventory_add', 'inventory_confirm_finished'];
+    if (QUEUEABLE.includes(action)) {
+        _offlineQueuePush(action, body);
+        _applyOptimisticUpdate(action, body);
+        return { success: true, _offline: true, _queued: true };
+    }
+    // Everything else (AI, Bring!, etc.): return offline error
+    return { success: false, error: 'offline', _offline: true };
+}
+
+// Optimistically update the cached inventory so the UI reflects the change immediately
+function _applyOptimisticUpdate(action, body) {
+    if (!body) return;
+    const cache = _offlineCacheGet();
+    if (!cache) return;
+    let changed = false;
+    if (action === 'inventory_update' && body.id) {
+        const idx = cache.findIndex(i => i.id === body.id);
+        if (idx >= 0) { Object.assign(cache[idx], body); changed = true; }
+    } else if (action === 'inventory_use' && body.id) {
+        const idx = cache.findIndex(i => i.id === body.id);
+        if (idx >= 0) {
+            const used = parseFloat(body.qty ?? body.amount ?? 0);
+            cache[idx].quantity = Math.max(0, parseFloat(cache[idx].quantity ?? 0) - used);
+            changed = true;
+        }
+    } else if (action === 'inventory_delete' && body.id) {
+        const idx = cache.findIndex(i => i.id === body.id);
+        if (idx >= 0) { cache.splice(idx, 1); changed = true; }
+    } else if (action === 'inventory_add') {
+        cache.push({ ...body, id: -(Date.now()), _offline: true });
+        changed = true;
+    }
+    if (changed) _offlineCacheSet(cache);
+}
+
+// ─── Offline mode: banner + cache reads/write queue ─────────────────────────
+function _enterOfflineMode() {
+    if (_offlineMode) return;
+    _offlineMode = true;
+    clearTimeout(_offlineBannerTimer);
+    clearTimeout(_continueBtnTimer);
+    // Hide the full overlay (no "restored" animation)
+    _hideNetworkOverlay(false);
+    // Unblock the UI and show a subtle offline indicator
+    document.body.classList.add('offline-mode');
+    _renderOfflineBanner(true); // loading state
+    // Load page content from the local cache, then update banner to "ready"
+    const p = refreshCurrentPage();
+    const afterLoad = () => _renderOfflineBanner(false);
+    if (p && typeof p.then === 'function') p.then(afterLoad).catch(afterLoad);
+    else setTimeout(afterLoad, 600);
+}
+
+async function _exitOfflineMode() {
+    _offlineMode = false; // first — so api() calls inside sync go to server
+    document.body.classList.remove('offline-mode');
+    const q = _offlineQueueGet();
+    if (q.length > 0) {
+        const synced = await _syncOfflineQueue();
+        if (synced > 0) {
+            showToast(t('error.offline_synced').replace('{n}', synced), 'success');
+            refreshCurrentPage();
+        }
+    }
+    const banner = document.getElementById('offline-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function _renderOfflineBanner(loading = false) {
+    const banner = document.getElementById('offline-banner');
+    const textEl = banner ? banner.querySelector('.offline-banner-text') : null;
+    if (!banner || !textEl) return;
+    const q = _offlineQueueGet();
+    if (q.length > 0) {
+        textEl.innerHTML = t('error.offline_ops_pending').replace('{n}', q.length);
+    } else if (loading) {
+        textEl.innerHTML = `<span class="offline-banner-dot"></span>${t('error.offline_reading_cache')}`;
+    } else {
+        const n = (_offlineCacheGet() || []).filter(i => parseFloat(i.quantity) > 0).length;
+        const msg = t('error.offline_cache_ready').replace('{n}', n);
+        textEl.innerHTML = msg;
+    }
+    banner.style.display = '';
+}
+
+async function _syncOfflineQueue() {
+    const q = _offlineQueueGet();
+    if (q.length === 0) return 0;
+    let synced = 0;
+    const failed = [];
+    const tempIdMap = {}; // negative temp id → real server id
+    for (const op of q) {
+        if (!op.action) continue;
+        let body = op.body ? { ...op.body } : {};
+        // Resolve any temp IDs from earlier add operations in this batch
+        if (typeof body.id === 'number' && body.id < 0 && tempIdMap[body.id]) {
+            body = { ...body, id: tempIdMap[body.id] };
+        }
+        try {
+            const result = await api(op.action, {}, 'POST', body);
+            if (result && result._offline) { failed.push(op); continue; }
+            if (op.action === 'inventory_add' && result?.id && op.body?.id < 0) {
+                tempIdMap[op.body.id] = result.id;
+            }
+            synced++;
+        } catch(_) { failed.push(op); }
+    }
+    _offlineQueueSet(failed);
+    return synced;
+}
+
+// ─── Overlay show / hide ────────────────────────────────────────────────────
+function _showNetworkOverlay() {
+    if (_networkDown) return;
+    if (_offlineMode) return; // Already in offline mode — don't interrupt the user
+    _networkDown      = true;
+    _networkFailCount = 0;
+    const el = document.getElementById('network-error-overlay');
+    if (!el) return;
+    el.classList.remove('restored', 'checking');
+    const titleEl    = document.getElementById('net-error-title');
+    const subtitleEl = document.getElementById('net-error-subtitle');
+    const iconEl     = document.getElementById('net-error-icon');
+    const statusEl   = document.getElementById('net-error-status');
+    const contBtn    = document.getElementById('net-error-continue-btn');
+    if (titleEl)    titleEl.textContent    = t('error.offline_title');
+    if (subtitleEl) subtitleEl.textContent = t('error.offline_subtitle');
+    if (iconEl)     iconEl.textContent     = '📡';
+    if (statusEl)   statusEl.textContent   = '';
+    if (contBtn)  { contBtn.style.display = 'none'; contBtn.classList.remove('visible'); }
+    el.style.display = 'flex';
+    requestAnimationFrame(() => el.classList.add('visible'));
+    // Show "Continue offline" button after 3 s
+    clearTimeout(_continueBtnTimer);
+    _continueBtnTimer = setTimeout(() => {
+        if (!_networkDown) return;
+        if (contBtn) {
+            contBtn.textContent = t('error.offline_continue');
+            contBtn.style.display = '';
+            requestAnimationFrame(() => contBtn.classList.add('visible'));
+        }
+    }, 3000);
+    // Auto-enter offline mode after 8 s if user hasn't acted
+    clearTimeout(_offlineBannerTimer);
+    _offlineBannerTimer = setTimeout(() => {
+        if (_networkDown && !_offlineMode) _enterOfflineMode();
+    }, _OFFLINE_MODE_DELAY_MS);
+}
+
+function _hideNetworkOverlay(showRestoredMsg) {
+    clearTimeout(_continueBtnTimer);
+    clearTimeout(_offlineBannerTimer);
+    _networkDown      = false;
+    _networkFailCount = 0;
+    const el      = document.getElementById('network-error-overlay');
+    const contBtn = document.getElementById('net-error-continue-btn');
+    if (contBtn) { contBtn.style.display = 'none'; contBtn.classList.remove('visible'); }
+    if (!el) return;
+    if (showRestoredMsg) {
+        el.classList.add('restored');
+        el.classList.remove('checking');
+        const titleEl  = document.getElementById('net-error-title');
+        const iconEl   = document.getElementById('net-error-icon');
+        const statusEl = document.getElementById('net-error-status');
+        if (titleEl)  titleEl.textContent  = t('error.offline_restored');
+        if (iconEl)   iconEl.textContent   = '✅';
+        if (statusEl) statusEl.textContent = '';
+        setTimeout(() => {
+            el.classList.remove('visible');
+            setTimeout(() => { el.style.display = 'none'; el.classList.remove('restored', 'checking'); }, 450);
+        }, 1800);
+    } else {
+        el.classList.remove('visible');
+        setTimeout(() => { el.style.display = 'none'; el.classList.remove('restored', 'checking'); }, 450);
+    }
+}
+
+// Ping the server; if reachable call _handleServerRestored() via heartbeat
+async function _networkPingOnce() {
+    const el       = document.getElementById('network-error-overlay');
+    const iconEl   = document.getElementById('net-error-icon');
+    const statusEl = document.getElementById('net-error-status');
+    if (el && el.classList.contains('visible')) {
+        el.classList.add('checking');
+        if (iconEl)   iconEl.textContent   = '🔄';
+        if (statusEl) statusEl.textContent = t('error.offline_checking');
+    }
+    try {
+        const res = await fetch(`${API_BASE}?action=ping&_t=${Date.now()}`, {
+            method: 'GET', cache: 'no-store',
+            signal: AbortSignal.timeout(4000),
+        });
+        if (res.ok) {
+            // Let heartbeat confirm the state authoritatively
+            _heartbeatRetry();
+        } else { throw new Error('not-ok'); }
+    } catch (_) {
+        if (el)       el.classList.remove('checking');
+        if (iconEl)   iconEl.textContent   = '📡';
+        if (statusEl) statusEl.textContent = '';
+    }
+}
+
+// Browser-native online/offline events
+window.addEventListener('offline', () => _showNetworkOverlay());
+window.addEventListener('online',  () => {
+    clearTimeout(_offlineBannerTimer); // don't auto-enter offline mode if we just came back
+    _networkPingOnce();
+});
+
 // ===== SCREENSAVER & INACTIVITY AUTO-REFRESH =====
 let _inactivityTimer = null;
 let _screensaverActive = false;
@@ -16074,17 +16475,59 @@ function _setServerOffline(offline) {
     }
     _serverOffline = offline;
     document.body.classList.toggle('server-offline', offline);
-    const banner = document.getElementById('offline-banner');
-    if (banner) banner.style.display = offline ? '' : 'none';
     if (offline) {
-        showToast(t('error.server_offline'), 'error');
+        if (!_offlineMode) {
+            // Show the full-screen network overlay (also auto-enters offline mode after 8 s)
+            _showNetworkOverlay();
+        }
+        // In offline mode the banner is already managed by _renderOfflineBanner()
     } else {
-        showToast(t('error.server_restored'), 'success');
-        // Refresh the current page since updates may have been missed
-        refreshCurrentPage();
+        // Server came back: exit offline mode (sync queue, refresh) then hide overlay
+        _handleServerRestored();
     }
     _heartbeatTimer = setTimeout(_runHeartbeat,
         offline ? _HB_INTERVAL_OFFLINE : _HB_INTERVAL_ONLINE);
+}
+
+/** Flush log messages and error reports that were buffered while offline. */
+async function _flushOfflineReports() {
+    try {
+        const logs = JSON.parse(localStorage.getItem(_OFFLINE_LOGS_KEY) || '[]');
+        if (logs.length > 0) {
+            localStorage.removeItem(_OFFLINE_LOGS_KEY);
+            await fetch('api/index.php?action=client_log', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: logs })
+            });
+        }
+    } catch(e) {}
+    try {
+        const errors = JSON.parse(localStorage.getItem(_OFFLINE_ERRORS_KEY) || '[]');
+        if (errors.length > 0) {
+            localStorage.removeItem(_OFFLINE_ERRORS_KEY);
+            for (const errBody of errors) {
+                await fetch('api/index.php?action=report_error', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(errBody)
+                }).catch(() => {});
+            }
+        }
+    } catch(e) {}
+}
+
+/** Async handler called when the server comes back online. */
+async function _handleServerRestored() {
+    if (_offlineMode) {
+        await _exitOfflineMode();
+    }
+    // Now hide the overlay with the "restored" message (if still visible)
+    if (_networkDown) {
+        _hideNetworkOverlay(true);
+    }
+    // Flush all logs and error reports buffered while offline → GitHub issues when applicable
+    _flushOfflineReports().catch(() => {});
+    showToast(t('error.server_restored'), 'success');
+    refreshCurrentPage();
 }
 
 /** Called by the banner "Retry" button to trigger an immediate check. */
@@ -16280,6 +16723,23 @@ async function _runStartupCheck() {
         await new Promise(r => setTimeout(r, 600));
     }
 
+    // ── Final step: sync local offline cache (inventory + settings) ──────────
+    // This ensures the offline copy is always fresh at startup while connected.
+    // The bar already shows 100%; we just update the label for a moment.
+    try {
+        setProgress(100, tl('syncing_local', 'Sincronizzazione dati locali...'), 'ok');
+        const [invData, settingsData] = await Promise.all([
+            fetch('api/index.php?action=inventory_list').then(r => r.json()).catch(() => null),
+            fetch('api/index.php?action=get_settings').then(r => r.json()).catch(() => null),
+        ]);
+        if (invData && Array.isArray(invData.inventory)) _offlineCacheSet(invData.inventory);
+        if (settingsData && settingsData.success !== false) _offlineCacheSetSettings(settingsData);
+        setProgress(100, tl('sync_done', 'Dati locali aggiornati'), 'ok');
+        await new Promise(r => setTimeout(r, 400));
+    } catch(e) {
+        // Non-critical — app continues normally; cache may be stale or empty
+    }
+
     wrapEl.style.display = 'none';
     return true;
 }
@@ -16401,6 +16861,24 @@ async function _initApp() {
     initScreensaverShortcuts();
     startBgShoppingRefresh();
     startHeartbeat();
+    // ── Recover any pending offline operations left over from a previous session ──
+    // This handles the case where the user refreshed the page while offline ops
+    // were queued — the queue survives in localStorage but _offlineMode is false.
+    (() => {
+        const startupQueue = _offlineQueueGet();
+        if (startupQueue.length === 0) return;
+        setTimeout(async () => {
+            const synced = await _syncOfflineQueue();
+            await _flushOfflineReports().catch(() => {});
+            if (synced > 0) {
+                showToast(t('error.offline_synced').replace('{n}', synced), 'success');
+                refreshCurrentPage();
+            } else {
+                // All ops failed to sync — keep them for next attempt
+                showToast(t('error.offline_ops_pending').replace('{n}', _offlineQueueGet().length), 'warning');
+            }
+        }, 1200);
+    })();
     _injectKioskOverlay(); // kiosk X / refresh buttons (only when running inside Android WebView)
 
     // Sync version label in preloader (in case HTML is stale)
