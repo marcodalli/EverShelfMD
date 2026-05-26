@@ -4395,7 +4395,9 @@ function _renderMonthlyStatsSection(data) {
     const catBars = top.map(c => {
         const color = _NUTR_COLORS[c.cat] || '#64748b';
         const barPct = Math.round(c.count / maxCnt * 100);
-        const label  = t('categories.' + c.cat) || c.cat;
+        // t() returns the key itself when not found — guard against it
+        const catKey = 'categories.' + c.cat;
+        const label  = t(catKey) !== catKey ? t(catKey) : c.cat.replace(/-/g, ' ');
         return `<div class="ms-cat-row">
             <span class="ms-cat-name">${escapeHtml(label)}</span>
             <div class="ms-cat-bar-wrap">
@@ -4455,15 +4457,15 @@ const _INSIGHT_PHASES = ['waste', 'nutrition', 'monthly'];
 
 function _startInsightAlternation() {
     clearInterval(_insightFlipTimer);
-    // Pick initial panel based on current hour, cycling through 3 phases
-    const idx = Math.floor(Date.now() / 3_600_000) % _INSIGHT_PHASES.length;
+    // Pick initial panel cycling through 3 phases based on current 30-second slot
+    const idx = Math.floor(Date.now() / 30_000) % _INSIGHT_PHASES.length;
     _insightPhase = _INSIGHT_PHASES[idx];
     _applyInsightPhase();
-    // Advance to next phase every hour
+    // Advance every 30 seconds so the rotation is actually visible
     _insightFlipTimer = setInterval(() => {
         _insightPhase = _INSIGHT_PHASES[(_INSIGHT_PHASES.indexOf(_insightPhase) + 1) % _INSIGHT_PHASES.length];
         _applyInsightPhase();
-    }, 3_600_000);
+    }, 30_000);
 }
 
 function _applyInsightPhase() {
@@ -4471,9 +4473,25 @@ function _applyInsightPhase() {
     const nutrEl    = document.getElementById('nutrition-section');
     const monthlyEl = document.getElementById('monthly-stats-section');
     if (!wasteEl || !nutrEl) return;
-    const showWaste   = _insightPhase === 'waste'     && wasteEl.innerHTML.trim()    !== '';
-    const showNutr    = _insightPhase === 'nutrition' && nutrEl.innerHTML.trim()     !== '';
-    const showMonthly = _insightPhase === 'monthly'   && !!monthlyEl && monthlyEl.innerHTML.trim() !== '';
+
+    // Map of which panels actually have rendered content
+    const hasContent = {
+        'waste':     wasteEl.innerHTML.trim()    !== '',
+        'nutrition': nutrEl.innerHTML.trim()     !== '',
+        'monthly':   !!monthlyEl && monthlyEl.innerHTML.trim() !== '',
+    };
+
+    // If the intended phase has no content, advance to the next one that does
+    let phase = _insightPhase;
+    for (let i = 0; i < _INSIGHT_PHASES.length; i++) {
+        if (hasContent[phase]) break;
+        phase = _INSIGHT_PHASES[(_INSIGHT_PHASES.indexOf(phase) + 1) % _INSIGHT_PHASES.length];
+    }
+
+    const showWaste   = phase === 'waste';
+    const showNutr    = phase === 'nutrition';
+    const showMonthly = phase === 'monthly';
+
     // Fade-swap all three panels
     const els = [wasteEl, nutrEl, ...(monthlyEl ? [monthlyEl] : [])];
     els.forEach(el => { el.style.opacity = '0'; el.style.transition = 'opacity .6s'; });
@@ -4481,8 +4499,6 @@ function _applyInsightPhase() {
         wasteEl.style.display   = showWaste   ? 'block' : 'none';
         nutrEl.style.display    = showNutr    ? 'block' : 'none';
         if (monthlyEl) monthlyEl.style.display = showMonthly ? 'block' : 'none';
-        // If nothing ready yet, keep waste visible as fallback
-        if (!showWaste && !showNutr && !showMonthly) wasteEl.style.display = 'block';
         requestAnimationFrame(() => {
             els.forEach(el => { el.style.opacity = '1'; });
             if (showNutr) {

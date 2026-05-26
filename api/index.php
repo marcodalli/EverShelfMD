@@ -3597,6 +3597,80 @@ function getStats(PDO $db): void {
 }
 
 // ===== MONTHLY STATS =====
+/**
+ * Normalize a raw category string (may contain OpenFoodFacts "en:slug" format)
+ * to one of the app's known Italian category slugs.
+ */
+function _normalizeCat(string $raw): string {
+    static $known = [
+        'frutta','verdura','carne','pesce','latticini',
+        'pasta','pane','cereali','bevande','condimenti',
+        'surgelati','conserve','snack','altro',
+    ];
+    $raw = trim($raw);
+    if (in_array($raw, $known, true)) return $raw;
+
+    // Strip language prefix: "en:", "it:", "fr:", etc.
+    $slug = (string)preg_replace('/^[a-z]{2}:/', '', $raw);
+    if (in_array($slug, $known, true)) return $slug;
+
+    // Map common OpenFoodFacts slugs → app categories
+    static $map = [
+        // latticini
+        'dairies'=>'latticini','dairy'=>'latticini','milk'=>'latticini',
+        'fermented-milk-products'=>'latticini','cheeses'=>'latticini',
+        'yogurts'=>'latticini','plant-based-milks'=>'latticini',
+        'cream'=>'latticini','butter'=>'latticini','eggs'=>'latticini',
+        // frutta
+        'fruits'=>'frutta','fresh-fruits'=>'frutta','tropical-fruits'=>'frutta',
+        'dried-fruits'=>'frutta','berries'=>'frutta',
+        // verdura
+        'vegetables'=>'verdura','fresh-vegetables'=>'verdura',
+        'plant-based-foods'=>'verdura','legumes'=>'verdura',
+        'mushrooms'=>'verdura','herbs'=>'verdura',
+        // carne
+        'meats'=>'carne','beef'=>'carne','pork'=>'carne',
+        'poultry'=>'carne','chicken'=>'carne','processed-meat'=>'carne',
+        'sausages'=>'carne','charcuterie'=>'carne',
+        // pesce
+        'fish'=>'pesce','seafood'=>'pesce','fish-products'=>'pesce',
+        'canned-fish'=>'conserve',
+        // pasta
+        'pastas'=>'pasta','pasta'=>'pasta','pasta-based-dishes'=>'pasta',
+        'noodles'=>'pasta',
+        // pane
+        'breads'=>'pane','bread'=>'pane','baked-goods'=>'pane',
+        'pastries'=>'pane','cakes'=>'snack',
+        // cereali
+        'cereals'=>'cereali','breakfast-cereals'=>'cereali',
+        'rice'=>'cereali','grains'=>'cereali','flours'=>'cereali',
+        'seeds'=>'cereali',
+        // bevande
+        'beverages'=>'bevande','drinks'=>'bevande','waters'=>'bevande',
+        'juices'=>'bevande','fruit-juices'=>'bevande','sodas'=>'bevande',
+        'plant-based-foods-and-beverages'=>'bevande','coffee'=>'bevande',
+        'tea'=>'bevande','alcoholic-beverages'=>'bevande','wine'=>'bevande',
+        'beer'=>'bevande',
+        // condimenti
+        'sauces'=>'condimenti','condiments'=>'condimenti',
+        'spreads'=>'condimenti','oils'=>'condimenti',
+        'vinegars'=>'condimenti','dressings'=>'condimenti',
+        'sugar'=>'condimenti','salt'=>'condimenti','spices'=>'condimenti',
+        // surgelati
+        'frozen-foods'=>'surgelati','frozen-vegetables'=>'surgelati',
+        'frozen-fish'=>'surgelati','ice-cream'=>'surgelati',
+        // conserve
+        'preserved-foods'=>'conserve','canned-foods'=>'conserve',
+        'jams'=>'conserve','pickles'=>'conserve','tomato-sauces'=>'conserve',
+        // snack
+        'snacks'=>'snack','cookies'=>'snack','chips'=>'snack',
+        'chocolates'=>'snack','candies'=>'snack','sweets'=>'snack',
+        'crackers'=>'snack','biscuits'=>'snack','nuts'=>'snack',
+    ];
+
+    return $map[$slug] ?? $map[strtolower($slug)] ?? 'altro';
+}
+
 function getMonthlyStats(PDO $db): void {
     EverLog::debug('getMonthlyStats');
 
@@ -3637,11 +3711,21 @@ function getMonthlyStats(PDO $db): void {
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     $totalCatEvents = array_sum(array_column($catRows, 'cnt')) ?: 1;
-    $topCats = array_map(fn($r) => [
-        'cat'   => $r['cat'],
-        'count' => (int)$r['cnt'],
-        'pct'   => (int)round((int)$r['cnt'] / $totalCatEvents * 100),
-    ], $catRows);
+
+    // Normalize OFF slugs (e.g. "en:dairies" → "latticini"), then re-aggregate
+    $normAgg = [];
+    foreach ($catRows as $r) {
+        $norm = _normalizeCat((string)$r['cat']);
+        $normAgg[$norm] = ($normAgg[$norm] ?? 0) + (int)$r['cnt'];
+    }
+    arsort($normAgg);
+    $normAgg    = array_slice($normAgg, 0, 4, true);
+    $totalNorm  = array_sum($normAgg) ?: 1;
+    $topCats = array_map(fn($cat, $cnt) => [
+        'cat'   => $cat,
+        'count' => $cnt,
+        'pct'   => (int)round($cnt / $totalNorm * 100),
+    ], array_keys($normAgg), array_values($normAgg));
 
     // Top consumed products this month
     $topProds = $db->query("
