@@ -801,6 +801,10 @@ try {
             getStats($db);
             break;
 
+        case 'monthly_stats':
+            getMonthlyStats($db);
+            break;
+
         case 'consumption_predictions':
             getConsumptionPredictions($db);
             break;
@@ -3589,6 +3593,80 @@ function getStats(PDO $db): void {
         'wasted_prev_30d' => $wastedP30,
         'used_prev_60d'   => $usedP60,
         'wasted_prev_60d' => $wastedP60,
+    ]);
+}
+
+// ===== MONTHLY STATS =====
+function getMonthlyStats(PDO $db): void {
+    EverLog::debug('getMonthlyStats');
+
+    $thisMonthStart = date('Y-m-01');
+    $lastMonthStart = date('Y-m-01', strtotime('first day of last month'));
+    $lastMonthEnd   = date('Y-m-01'); // exclusive upper bound for prev month
+
+    // Totals: consumed + added + wasted this month vs previous calendar month
+    $totals = $db->query("
+        SELECT
+            SUM(CASE WHEN created_at >= '{$thisMonthStart}'
+                      AND type IN ('out','waste') AND undone=0 THEN 1 ELSE 0 END) AS this_out,
+            SUM(CASE WHEN created_at >= '{$lastMonthStart}' AND created_at < '{$lastMonthEnd}'
+                      AND type IN ('out','waste') AND undone=0 THEN 1 ELSE 0 END) AS prev_out,
+            SUM(CASE WHEN created_at >= '{$thisMonthStart}'
+                      AND type = 'in' AND undone=0 THEN 1 ELSE 0 END) AS this_in,
+            SUM(CASE WHEN created_at >= '{$thisMonthStart}'
+                      AND type = 'waste' AND undone=0 THEN 1 ELSE 0 END) AS this_wasted
+        FROM transactions
+        WHERE created_at >= '{$lastMonthStart}'
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    $thisOut   = (int)($totals['this_out']    ?? 0);
+    $prevOut   = (int)($totals['prev_out']    ?? 0);
+    $thisIn    = (int)($totals['this_in']     ?? 0);
+    $thisWaste = (int)($totals['this_wasted'] ?? 0);
+
+    // Top categories consumed this month
+    $catRows = $db->query("
+        SELECT COALESCE(NULLIF(TRIM(p.category), ''), 'altro') AS cat, COUNT(*) AS cnt
+        FROM transactions t
+        JOIN products p ON t.product_id = p.id
+        WHERE t.type IN ('out','waste') AND t.undone = 0
+          AND t.created_at >= '{$thisMonthStart}'
+        GROUP BY cat
+        ORDER BY cnt DESC
+        LIMIT 5
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $totalCatEvents = array_sum(array_column($catRows, 'cnt')) ?: 1;
+    $topCats = array_map(fn($r) => [
+        'cat'   => $r['cat'],
+        'count' => (int)$r['cnt'],
+        'pct'   => (int)round((int)$r['cnt'] / $totalCatEvents * 100),
+    ], $catRows);
+
+    // Top consumed products this month
+    $topProds = $db->query("
+        SELECT p.name, COUNT(*) AS cnt
+        FROM transactions t
+        JOIN products p ON t.product_id = p.id
+        WHERE t.type IN ('out','waste') AND t.undone = 0
+          AND t.created_at >= '{$thisMonthStart}'
+        GROUP BY t.product_id
+        ORDER BY cnt DESC
+        LIMIT 3
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    echo json_encode([
+        'success'             => true,
+        'month'               => date('Y-m'),
+        'items_consumed'      => $thisOut,
+        'items_consumed_prev' => $prevOut,
+        'items_added'         => $thisIn,
+        'items_wasted'        => $thisWaste,
+        'top_categories'      => $topCats,
+        'top_products'        => array_map(fn($r) => [
+            'name'  => $r['name'],
+            'count' => (int)$r['cnt'],
+        ], $topProds),
     ]);
 }
 

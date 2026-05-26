@@ -4355,44 +4355,144 @@ function _nutrScoreBar(label, val, color) {
     </div>`;
 }
 
-/**
- * Start the waste ↔ nutrition alternation on the dashboard.
- * One is shown, the other hidden; they swap every hour (+ random phase offset).
- */
-let _insightPhase = null; // 'waste' | 'nutrition'
+// ===== MONTHLY STATS SECTION =====
+// Third panel in the insight rotation (waste → nutrition → monthly → waste …)
 
-function _startInsightAlternation(inventory) {
+function _renderMonthlyStatsSection(data) {
+    const section = document.getElementById('monthly-stats-section');
+    if (!section) return;
+    if (!data || !data.success || data.items_consumed === 0) {
+        section.innerHTML = '';
+        section.style.display = 'none';
+        return;
+    }
+
+    // Month label from 'YYYY-MM' → formatted locale string
+    const [yr, mo] = data.month.split('-').map(Number);
+    const localeMap = { de: 'de-DE', fr: 'fr-FR', es: 'es-ES', en: 'en-GB', it: 'it-IT' };
+    const locale = localeMap[_currentLang] || 'it-IT';
+    const monthLabel = new Date(yr, mo - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+    const prevLabel  = new Date(yr, mo - 2, 1).toLocaleDateString(locale, { month: 'long' });
+
+    // Trend vs previous month
+    let trendHTML = '';
+    const prev = data.items_consumed_prev;
+    const curr = data.items_consumed;
+    if (prev > 0) {
+        const diff = Math.round((curr - prev) / prev * 100);
+        if (diff < -2) {
+            trendHTML = `<span class="aw-arrow-good">↓ ${t('stats_monthly.trend_down').replace('{pct}', Math.abs(diff)).replace('{prev}', prevLabel)}</span>`;
+        } else if (diff > 2) {
+            trendHTML = `<span class="aw-arrow-bad">↑ ${t('stats_monthly.trend_up').replace('{pct}', diff).replace('{prev}', prevLabel)}</span>`;
+        } else {
+            trendHTML = `<span class="aw-arrow-ok">→ ${t('stats_monthly.trend_same')}</span>`;
+        }
+    }
+
+    // Top category bars
+    const top = (data.top_categories || []).slice(0, 4);
+    const maxCnt = top.length ? Math.max(...top.map(c => c.count)) : 1;
+    const catBars = top.map(c => {
+        const color = _NUTR_COLORS[c.cat] || '#64748b';
+        const barPct = Math.round(c.count / maxCnt * 100);
+        const label  = t('categories.' + c.cat) || c.cat;
+        return `<div class="ms-cat-row">
+            <span class="ms-cat-name">${escapeHtml(label)}</span>
+            <div class="ms-cat-bar-wrap">
+                <div class="ms-cat-bar" style="background:${color}" data-target="${barPct}"></div>
+            </div>
+            <span class="ms-cat-cnt">${c.count}</span>
+        </div>`;
+    }).join('');
+
+    // Badges
+    const badges = [];
+    if (data.items_added > 0)
+        badges.push(`<span class="aw-badge"><span class="aw-badge-icon">📦</span><span class="aw-badge-body"><b>${data.items_added}</b><small>${t('stats_monthly.added')}</small></span></span>`);
+    if (data.items_wasted > 0)
+        badges.push(`<span class="aw-badge aw-badge-wasted"><span class="aw-badge-icon">🗑️</span><span class="aw-badge-body"><b>${data.items_wasted}</b><small>${t('stats_monthly.wasted')}</small></span></span>`);
+    if (data.top_products?.length > 0)
+        badges.push(`<span class="aw-badge aw-badge-better"><span class="aw-badge-icon">⭐</span><span class="aw-badge-body"><b>${escapeHtml(data.top_products[0].name)}</b><small>${t('stats_monthly.top_used')}</small></span></span>`);
+
+    section.innerHTML = `
+    <div class="nutr-card">
+        <div class="aw-header">
+            <div class="aw-title-row">
+                <span class="aw-live-dot aw-live-on"></span>
+                <h3 class="aw-title">${t('stats_monthly.title')}</h3>
+            </div>
+            <span class="aw-grade" style="background:#6366f1;font-size:.75rem;padding:4px 10px">${monthLabel}</span>
+        </div>
+
+        <div class="ms-main-row">
+            <div class="ms-main-num">${curr}</div>
+            <div class="ms-main-info">
+                <div class="ms-main-label">${t('stats_monthly.consumed')}</div>
+                <div class="ms-trend">${trendHTML}</div>
+            </div>
+        </div>
+
+        ${top.length > 0 ? `
+        <div class="ms-cats-section">
+            <div class="ms-cats-title">${t('stats_monthly.top_cats')}</div>
+            ${catBars}
+        </div>` : ''}
+
+        ${badges.length > 0 ? `<div class="aw-savings-row ms-badges-row">${badges.join('')}</div>` : ''}
+
+        <div class="aw-source">${t('stats_monthly.source')}</div>
+    </div>`;
+
+    // Show only if it's the active phase (mirrors _applyInsightPhase logic)
+    section.style.display = (_insightPhase === 'monthly') ? 'block' : 'none';
+}
+
+/**
+ * Start the waste ↔ nutrition ↔ monthly stats alternation on the dashboard.
+ */
+let _insightPhase = null; // 'waste' | 'nutrition' | 'monthly'
+const _INSIGHT_PHASES = ['waste', 'nutrition', 'monthly'];
+
+function _startInsightAlternation() {
     clearInterval(_insightFlipTimer);
-    // Pick initial panel based on current minute: even hour → waste, odd → nutrition
-    const isNutritionTurn = Math.floor(Date.now() / 3_600_000) % 2 === 1;
-    _insightPhase = isNutritionTurn ? 'nutrition' : 'waste';
+    // Pick initial panel based on current hour, cycling through 3 phases
+    const idx = Math.floor(Date.now() / 3_600_000) % _INSIGHT_PHASES.length;
+    _insightPhase = _INSIGHT_PHASES[idx];
     _applyInsightPhase();
-    // Flip every hour
+    // Advance to next phase every hour
     _insightFlipTimer = setInterval(() => {
-        _insightPhase = _insightPhase === 'waste' ? 'nutrition' : 'waste';
+        _insightPhase = _INSIGHT_PHASES[(_INSIGHT_PHASES.indexOf(_insightPhase) + 1) % _INSIGHT_PHASES.length];
         _applyInsightPhase();
     }, 3_600_000);
 }
 
 function _applyInsightPhase() {
-    const wasteEl = document.getElementById('waste-chart-section');
-    const nutrEl  = document.getElementById('nutrition-section');
+    const wasteEl   = document.getElementById('waste-chart-section');
+    const nutrEl    = document.getElementById('nutrition-section');
+    const monthlyEl = document.getElementById('monthly-stats-section');
     if (!wasteEl || !nutrEl) return;
-    const showNutr = _insightPhase === 'nutrition' && nutrEl.innerHTML.trim() !== '';
-    const showWaste = _insightPhase === 'waste'    && wasteEl.innerHTML.trim() !== '';
-    // Fade-swap
-    [wasteEl, nutrEl].forEach(el => { el.style.opacity = '0'; el.style.transition = 'opacity .6s'; });
+    const showWaste   = _insightPhase === 'waste'     && wasteEl.innerHTML.trim()    !== '';
+    const showNutr    = _insightPhase === 'nutrition' && nutrEl.innerHTML.trim()     !== '';
+    const showMonthly = _insightPhase === 'monthly'   && !!monthlyEl && monthlyEl.innerHTML.trim() !== '';
+    // Fade-swap all three panels
+    const els = [wasteEl, nutrEl, ...(monthlyEl ? [monthlyEl] : [])];
+    els.forEach(el => { el.style.opacity = '0'; el.style.transition = 'opacity .6s'; });
     setTimeout(() => {
-        wasteEl.style.display = showWaste ? 'block' : 'none';
-        nutrEl.style.display  = showNutr  ? 'block' : 'none';
-        // If neither ready yet, keep waste visible
-        if (!showWaste && !showNutr) wasteEl.style.display = 'block';
+        wasteEl.style.display   = showWaste   ? 'block' : 'none';
+        nutrEl.style.display    = showNutr    ? 'block' : 'none';
+        if (monthlyEl) monthlyEl.style.display = showMonthly ? 'block' : 'none';
+        // If nothing ready yet, keep waste visible as fallback
+        if (!showWaste && !showNutr && !showMonthly) wasteEl.style.display = 'block';
         requestAnimationFrame(() => {
-            wasteEl.style.opacity = '1';
-            nutrEl.style.opacity  = '1';
-            // Animate score bars when nutrition becomes visible
+            els.forEach(el => { el.style.opacity = '1'; });
             if (showNutr) {
                 nutrEl.querySelectorAll('.nutr-score-fill').forEach(bar => {
+                    bar.style.width = (bar.dataset.target || 0) + '%';
+                });
+            }
+            if (showMonthly && monthlyEl) {
+                monthlyEl.querySelectorAll('.ms-cat-bar').forEach(bar => {
+                    bar.style.transition = 'width 0.6s ease';
                     bar.style.width = (bar.dataset.target || 0) + '%';
                 });
             }
@@ -4512,10 +4612,11 @@ async function loadDashboard() {
         // Banner alerts (suspicious quantities + consumption predictions)
         loadBannerAlerts();
 
-        // Anti-waste section + Nutrition section: load in parallel
-        const [, invForNutr] = await Promise.all([
+        // Anti-waste section + Nutrition section + Monthly stats: load in parallel
+        const [, invForNutr, monthlyData] = await Promise.all([
             _awLoadFacts(),
             api('inventory_list').then(d => d.inventory || []).catch(() => []),
+            api('monthly_stats').catch(() => null),
         ]);
         _renderAntiWasteSection(
             statsData.used_30d      || 0, statsData.wasted_30d      || 0,
@@ -4527,6 +4628,10 @@ async function loadDashboard() {
 
         // Nutrition section — built from the full inventory list
         _renderNutritionSection(invForNutr);
+
+        // Monthly stats panel
+        _renderMonthlyStatsSection(monthlyData);
+
         _startInsightAlternation();
 
         // Opened (partially used products with known package capacity)

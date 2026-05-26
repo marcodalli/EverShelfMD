@@ -1424,5 +1424,17 @@
         "retry": "Retry",
         "syncing_local": "Syncing local data...",
         "sync_done": "Local data synced"
+    },
+    "stats_monthly": {
+        "title": "Monthly Stats",
+        "consumed": "products used",
+        "trend_up": "+{pct}% vs {prev}",
+        "trend_down": "-{pct}% vs {prev}",
+        "trend_same": "same pace as last month",
+        "added": "added",
+        "wasted": "wasted",
+        "top_used": "top used",
+        "top_cats": "Top categories",
+        "source": "Transaction history · current month"
     }
 }

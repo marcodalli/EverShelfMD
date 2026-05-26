@@ -6924,6 +6924,82 @@ body.cooking-mode-active .app-header {
 }
 .nutr-score-val { flex: 0 0 32px; text-align: right; font-weight: 600; }
 
+/* ===== MONTHLY STATS PANEL ===== */
+.ms-main-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 12px 0 8px;
+}
+.ms-main-num {
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #6366f1;
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+.ms-main-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ms-main-label {
+    font-size: .85rem;
+    color: #94a3b8;
+}
+.ms-trend {
+    font-size: .8rem;
+    font-weight: 500;
+}
+.ms-cats-section {
+    margin: 6px 0 4px;
+}
+.ms-cats-title {
+    font-size: .68rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 7px;
+}
+.ms-cat-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+.ms-cat-name {
+    font-size: .74rem;
+    color: #cbd5e1;
+    min-width: 78px;
+    max-width: 78px;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ms-cat-bar-wrap {
+    flex: 1;
+    height: 8px;
+    background: #1e293b;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.ms-cat-bar {
+    height: 100%;
+    border-radius: 4px;
+    width: 0;
+}
+.ms-cat-cnt {
+    font-size: .7rem;
+    color: #64748b;
+    min-width: 22px;
+    text-align: right;
+}
+.ms-badges-row {
+    margin-top: 6px;
+}
+
 /* ===== SETUP WIZARD ===== */
 .setup-wizard-content {
     max-width: 480px;
