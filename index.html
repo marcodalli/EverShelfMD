@@ -11,20 +11,20 @@
     <title>EverShelf</title>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="assets/img/logo/logo_icon.png">
-    <link rel="stylesheet" href="assets/css/style.css?v=20260606g">
+    <link rel="stylesheet" href="assets/css/style.css?v=20260606m">
     <!-- Core modules (auth, DOM helpers) -->
     <script src="assets/js/core/dom.js?v=20260603a"></script>
     <script src="assets/js/core/auth.js?v=20260603b"></script>
-    <!-- ZBar WASM — fast barcode engine (primary fallback when native API missing/slow) -->
-    <script src="assets/vendor/zbar/index.js?v=20260606a"></script>
+    <!-- ZBar WASM — lazy on kiosk WebView (OOM); eager elsewhere -->
     <script>
-    if (window.zbarWasm && zbarWasm.setModuleArgs) {
-        zbarWasm.setModuleArgs({
-            locateFile: (file) => 'assets/vendor/zbar/' + file
-        });
-    }
+    (function () {
+        var kioskWv = /; wv\)/.test(navigator.userAgent);
+        if (kioskWv) return;
+        document.write('<script src="assets/vendor/zbar/index.js?v=20260606a"><\/script>');
+        document.write('<script>if(window.zbarWasm&&zbarWasm.setModuleArgs){zbarWasm.setModuleArgs({locateFile:function(f){return"assets/vendor/zbar/"+f}});}<\/script>');
+        document.write('<script src="assets/vendor/zbar/polyfill.js?v=20260606a"><\/script>');
+    })();
     </script>
-    <script src="assets/vendor/zbar/polyfill.js?v=20260606a"></script>
     <!-- QuaggaJS — legacy last-resort only -->
     <script src="assets/vendor/quagga/quagga.min.js?v=20260603a"></script>
     <script>if(typeof Quagga==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"><\\/script>');}</script>
@@ -94,7 +94,7 @@
         <div id="preloader-warnings" class="preloader-warnings" style="display:none"></div>
         <div id="preloader-error-msg" class="preloader-error-msg" style="display:none"></div>
         <button id="preloader-retry-btn" class="preloader-retry-btn" style="display:none" onclick="_startupRetry()">🔄 <span data-i18n="startup.retry">Riprova</span></button>
-        <span class="app-preloader-version" id="preloader-version">v1.7.38</span>
+        <span class="app-preloader-version" id="preloader-version">v1.7.39</span>
     </div>
 </div>
 
@@ -107,7 +107,7 @@
         <!-- Title — left-aligned; grows to fill space -->
         <div class="header-title-wrap">
             <h1 class="header-title" onclick="showPage('dashboard')">
-                <img src="assets/img/logo/logo_icon.png" alt="" class="header-logo-icon" aria-hidden="true" /><span data-i18n="nav.title">EverShelf</span><span class="header-version">v1.7.38</span>
+                <img src="assets/img/logo/logo_icon.png" alt="" class="header-logo-icon" aria-hidden="true" /><span data-i18n="nav.title">EverShelf</span><span class="header-version">v1.7.39</span>
             </h1>
             <!-- Update badge — shown alongside title, never replaces it -->
             <span class="header-update-badge" id="header-update-badge" style="display:none"></span>
@@ -1985,6 +1985,6 @@
     </div>
 </div>
 
-<script src="assets/js/app.js?v=20260606g"></script>
+<script src="assets/js/app.js?v=20260606n"></script>
 </body>
 </html>

@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Recipe scraps tips** — During cooking steps, detect "waste" generated (peels, cores, bones, eggshells, coffee grounds, citrus zest, etc.) and surface AI-powered tips on how to reuse them (compost, natural cleaner, broth, candied peel, etc.). Could be shown as an optional collapsible hint card below the step that generates the scrap.
 
+## [1.7.39] - 2026-06-06
+
+### Added
+- **`resolve_barcode` API** — Single round-trip: local catalog lookup plus **parallel** external search (Open Food Facts IT/world, UPC Item DB, Open Products Facts, Open Beauty Facts via `curl_multi`). Results are stored in SQLite `barcode_cache` for instant repeat scans.
+- **Spesa barcode fast path** — In shopping mode, a successful scan opens the **add form directly** (skips the intermediate action page).
+- **Session barcode cache** — In-memory cache avoids duplicate API calls when scanning many items in one trip.
+- **Manual expiry flag (`expiry_user_set`)** — User-entered expiry dates are kept when changing location, vacuum seal, or moving stock; only auto-estimated dates are recalculated.
+- **Family sibling 24h dedup** — After confirming “Sì, tutto ok” on a similar in-stock product, the check prompt is suppressed for the same `shopping_name` family for 24 hours (synced via `family_sibling_confirmed` in app settings).
+- **Family sibling stock line** — Spesa prompt shows readable stock (e.g. `4 conf (da 20g)`); new `family_sibling_check` / `family_sibling_stock` strings in IT/EN/DE/FR/ES.
+- **Quick-edit product notes** — Notes field in the inline name/brand editor on the product action page.
+
+### Fixed
+- **Kiosk / WebView stability** — Guard `$_SERVER['REQUEST_METHOD']` when null; fix JS temporal-dead-zone crashes (`setProgress`, `enriched` → `enrichedRaw`, `duplicateNames`); lazy-load ZBar WASM so kiosk startup no longer OOM-crashes.
+- **Empty barcode SQL error** — Multiple products with `barcode = ''` violated SQLite UNIQUE; empty strings are normalized to `NULL` (migration included).
+- **Spesa ghost products** — Finished/catalog AI candidates and scan recents no longer show zero-stock items in shopping mode; `family_sibling_suggest` requires live inventory quantity.
+- **Insalata di riso misclassification** — Prepared rice salads (e.g. Ponti) map to `pasta` instead of fresh `verdura`; server and client rules aligned.
+- **Family sibling prompt readability** — Quantity and question text use high-contrast colours on the dark overlay.
+- **Move after use / recipe move** — Respects manually set expiry (`expiry_user_set`); purchased items marked on blocklist after spesa add.
+
+### Changed
+- **Barcode lookup** — Replaced sequential API waterfall (up to ~15s) with parallel fetch (~1–2s first hit); 30-minute negative cache for unknown codes.
+- **Local barcode search** — Automatically tries EAN-13 / UPC-A variant barcodes.
+
 ## [1.7.38] - 2026-06-04
 
 ### Fixed

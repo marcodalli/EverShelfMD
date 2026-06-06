@@ -148,6 +148,24 @@ function migrateDB(PDO $db): void {
         catch (PDOException $e) { if (strpos($e->getMessage(), 'duplicate column') === false) throw $e; }
     }
 
+    // Empty barcode strings break UNIQUE (only one '' allowed); normalize to NULL.
+    $db->exec("UPDATE products SET barcode = NULL WHERE barcode IS NOT NULL AND TRIM(barcode) = ''");
+
+    $invCols = $db->query("PRAGMA table_info(inventory)")->fetchAll();
+    $invColNames = array_column($invCols, 'name');
+    if (!in_array('expiry_user_set', $invColNames)) {
+        try { $db->exec("ALTER TABLE inventory ADD COLUMN expiry_user_set INTEGER DEFAULT 0"); }
+        catch (PDOException $e) { if (strpos($e->getMessage(), 'duplicate column') === false) throw $e; }
+    }
+
+    $db->exec("CREATE TABLE IF NOT EXISTS barcode_cache (
+        barcode TEXT PRIMARY KEY,
+        found INTEGER NOT NULL DEFAULT 0,
+        source TEXT,
+        payload TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )");
+
     // Migrate transactions CHECK constraint to allow 'waste' type
     $sql = $db->query("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'")->fetchColumn();
     if ($sql && strpos($sql, "'waste'") === false) {
@@ -443,6 +461,7 @@ function estimateOpenedExpiryDaysPHP(string $name, string $category, string $loc
     if (preg_match('/\b(pollo|tacchino|maiale|manzo|vitello|agnello)\b/', $n)) return 2;
     if (preg_match('/salmone|tonno\s+fresco|pesce(?!\s+in)/', $n)) return 2;
     if (preg_match('/\b(passata|pelati|polpa|sugo|salsa\s+di\s+pomodoro)\b/', $n)) return 5;
+    if (preg_match('/insalata\s+di\s+(riso|pasta|farro|orzo|couscous)/', $n)) return 7;
     if (preg_match('/insalata|rucola|spinaci|lattuga|crescione|germogli/', $n)) return 4;
     if (preg_match('/\b(succo|spremuta)\b/', $n)) return 3;
     if (preg_match('/\b(birra|beer)\b/', $n)) return 3;
@@ -520,6 +539,7 @@ function estimateSealedExpiryDaysPHP(string $name, string $category, string $loc
     elseif (preg_match('/uova/', $n)) $days = 28;
     elseif (preg_match('/pane\s+fresco|pane\s+in\s+cassetta/', $n)) $days = 5;
     elseif (preg_match('/pane\s+confezionato|pan\s+carr|pancarrè/', $n)) $days = 14;
+    elseif (preg_match('/insalata\s+di\s+(riso|pasta|farro|orzo|couscous)/', $n)) $days = 7;
     elseif (preg_match('/insalata|rucola|spinaci\s+freschi/', $n)) $days = 5;
     elseif (preg_match('/pollo|tacchino|maiale|manzo|vitello|sovracosci|cosci/', $n)) $days = 3;
     elseif (preg_match('/salmone|tonno\s+fresco|pesce/', $n) && !preg_match('/tonno\s+in\s+scatola|tonno\s+rio/', $n)) $days = 2;

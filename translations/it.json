@@ -522,6 +522,8 @@
     "urgency_spec_medium": "🟡 A breve",
     "urgency_spec_low": "🔵 Previsione",
     "family_sibling_title": "Simile in {location}",
+    "family_sibling_check": "Controlla: {name}",
+    "family_sibling_stock": "Dovresti avere: {qty}",
     "family_sibling_location": "Si trova in: {location}",
     "family_sibling_qty": "Quantità: {qty}",
     "family_sibling_purchased": "Acquistato il {date}",

@@ -522,6 +522,8 @@
     "urgency_spec_medium": "🟡 Bald",
     "urgency_spec_low": "🔵 Prognose",
     "family_sibling_title": "Ähnlich in {location}",
+    "family_sibling_check": "Prüfen: {name}",
+    "family_sibling_stock": "Du solltest haben: {qty}",
     "family_sibling_location": "Standort: {location}",
     "family_sibling_qty": "Menge: {qty}",
     "family_sibling_purchased": "Gekauft am {date}",

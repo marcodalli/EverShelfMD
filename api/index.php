@@ -44,7 +44,7 @@ if (!defined('CRON_MODE')) {
 header('Content-Type: application/json; charset=utf-8');
 evershelfSendCorsHeaders();
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
@@ -682,8 +682,8 @@ try {
     exit;
 }
 
-$method = $_SERVER['REQUEST_METHOD'];
-$action = $_GET['action'] ?? '';
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = (string)($_GET['action'] ?? '');
 EverLog::request($action, $method);
 
 // API token auth (when API_TOKEN or SETTINGS_TOKEN is configured)
@@ -708,6 +708,9 @@ try {
             break;
         case 'lookup_barcode':
             lookupBarcode();
+            break;
+        case 'resolve_barcode':
+            resolveBarcode($db);
             break;
         case 'stock_for_name':
             stockForName($db);
@@ -2180,20 +2183,339 @@ function getClientLog(): void {
 // ===== PRODUCT FUNCTIONS =====
 
 function searchBarcode(PDO $db): void {
-    $barcode = $_GET['barcode'] ?? '';
-    if (empty($barcode)) {
+    $barcode = barcodeNormalizeDigits($_GET['barcode'] ?? '');
+    if ($barcode === '') {
         EverLog::info('searchBarcode');
         echo json_encode(['found' => false]);
         return;
     }
-    $stmt = $db->prepare("SELECT * FROM products WHERE barcode = ?");
-    $stmt->execute([$barcode]);
-    $product = $stmt->fetch();
+    $product = barcodeFindLocalProduct($db, $barcode);
     if ($product) {
         echo json_encode(['found' => true, 'product' => $product]);
     } else {
         echo json_encode(['found' => false]);
     }
+}
+
+/** Strip non-digits; used for lookup keys. */
+function barcodeNormalizeDigits(string $barcode): string {
+    return preg_replace('/\D/', '', trim($barcode));
+}
+
+/** EAN-13 / UPC-A variant barcodes to try against local DB and external APIs. */
+function barcodeLookupCandidates(string $barcode): array {
+    $barcode = barcodeNormalizeDigits($barcode);
+    if ($barcode === '') {
+        return [];
+    }
+    $candidates = [$barcode];
+    if (strlen($barcode) === 12 && ctype_digit($barcode)) {
+        $candidates[] = '0' . $barcode;
+    }
+    if (strlen($barcode) === 13 && $barcode[0] === '0') {
+        $candidates[] = substr($barcode, 1);
+    }
+    return array_values(array_unique($candidates));
+}
+
+function barcodeFindLocalProduct(PDO $db, string $barcode): ?array {
+    $stmt = $db->prepare("SELECT * FROM products WHERE barcode = ?");
+    foreach (barcodeLookupCandidates($barcode) as $bc) {
+        $stmt->execute([$bc]);
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($product) {
+            return $product;
+        }
+    }
+    return null;
+}
+
+function barcodeCacheGet(PDO $db, string $barcode): ?array {
+    $stmt = $db->prepare("SELECT found, source, payload, updated_at FROM barcode_cache WHERE barcode = ?");
+    $stmt->execute([$barcode]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+    $found = (int)$row['found'] === 1;
+    if (!$found) {
+        $age = time() - strtotime((string)$row['updated_at']);
+        if ($age > 1800) { // 30 min negative cache
+            return null;
+        }
+        return ['found' => false, 'source' => $row['source'] ?? 'cache'];
+    }
+    $payload = json_decode((string)$row['payload'], true);
+    if (!is_array($payload)) {
+        return null;
+    }
+    $payload['source'] = $row['source'] ?? ($payload['source'] ?? 'cache');
+    return $payload;
+}
+
+function barcodeCacheSet(PDO $db, string $barcode, array $payload, bool $found): void {
+    $stmt = $db->prepare("INSERT INTO barcode_cache (barcode, found, source, payload, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(barcode) DO UPDATE SET
+            found = excluded.found,
+            source = excluded.source,
+            payload = excluded.payload,
+            updated_at = excluded.updated_at");
+    $stmt->execute([
+        $barcode,
+        $found ? 1 : 0,
+        $payload['source'] ?? ($found ? 'external' : 'miss'),
+        json_encode($payload, JSON_UNESCAPED_UNICODE),
+    ]);
+}
+
+/** Parallel HTTP GET — returns map key => body (or null). */
+function barcodeHttpParallel(array $requests, int $timeoutSec = 4): array {
+    if (empty($requests)) {
+        return [];
+    }
+    $mh = curl_multi_init();
+    $handles = [];
+    foreach ($requests as $key => $url) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $timeoutSec,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_HTTPHEADER => ['User-Agent: EverShelf/1.0'],
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $handles[$key] = $ch;
+    }
+    $running = null;
+    do {
+        $status = curl_multi_exec($mh, $running);
+        if ($running && $status === CURLM_OK) {
+            curl_multi_select($mh, 0.15);
+        }
+    } while ($running > 0);
+
+    $out = [];
+    foreach ($handles as $key => $ch) {
+        $body = curl_multi_getcontent($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $out[$key] = ($body !== false && $body !== '' && $code >= 200 && $code < 300) ? $body : null;
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+    }
+    curl_multi_close($mh);
+    return $out;
+}
+
+function _parseOffProductJson(?string $json): ?array {
+    if (!$json) {
+        return null;
+    }
+    $data = json_decode($json, true);
+    if (!isset($data['status']) || (int)$data['status'] !== 1 || empty($data['product'])) {
+        return null;
+    }
+    $p = $data['product'];
+
+    $name = '';
+    foreach (['product_name_it', 'generic_name_it', 'product_name', 'generic_name'] as $f) {
+        if (!empty($p[$f])) { $name = $p[$f]; break; }
+    }
+    if ($name === '') {
+        return null;
+    }
+
+    if (preg_match('/[\x{0600}-\x{06FF}\x{0E00}-\x{0E7F}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}\x{0400}-\x{04FF}]/u', $name)) {
+        $latinName = '';
+        foreach (['generic_name_it', 'generic_name', 'product_name_it', 'product_name'] as $f) {
+            if (!empty($p[$f]) && !preg_match('/[\x{0600}-\x{06FF}\x{0E00}-\x{0E7F}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}\x{0400}-\x{04FF}]/u', $p[$f])) {
+                $latinName = $p[$f]; break;
+            }
+        }
+        $name = $latinName !== '' ? $latinName : (!empty($p['brands']) ? $p['brands'] : 'Prodotto sconosciuto');
+    }
+
+    $ingredients = $p['ingredients_text_it'] ?? $p['ingredients_text'] ?? '';
+    $catHierarchy = $p['categories_hierarchy'] ?? [];
+    $category = $p['categories_tags'][0] ?? (empty($catHierarchy) ? null : end($catHierarchy)) ?? $p['categories'] ?? '';
+    $allergens = '';
+    if (!empty($p['allergens_tags'])) {
+        $allergens = implode(', ', array_map(fn($a) => str_replace('en:', '', $a), $p['allergens_tags']));
+    }
+
+    $nutriments = null;
+    if (!empty($p['nutriments']) && is_array($p['nutriments'])) {
+        $nm = $p['nutriments'];
+        $nutriments = [
+            'energy_kcal_100g' => isset($nm['energy-kcal_100g']) ? round((float)$nm['energy-kcal_100g'], 1) : (isset($nm['energy_100g']) ? round((float)$nm['energy_100g'] / 4.184, 1) : null),
+            'proteins_100g'    => isset($nm['proteins_100g'])    ? round((float)$nm['proteins_100g'], 1)    : null,
+            'carbohydrates_100g' => isset($nm['carbohydrates_100g']) ? round((float)$nm['carbohydrates_100g'], 1) : null,
+            'fat_100g'         => isset($nm['fat_100g'])         ? round((float)$nm['fat_100g'], 1)         : null,
+            'fiber_100g'       => isset($nm['fiber_100g'])       ? round((float)$nm['fiber_100g'], 1)       : null,
+            'salt_100g'        => isset($nm['salt_100g'])        ? round((float)$nm['salt_100g'], 1)        : null,
+        ];
+        if (!array_filter(array_values($nutriments))) {
+            $nutriments = null;
+        }
+    }
+
+    return [
+        'name'          => $name,
+        'brand'         => $p['brands'] ?? '',
+        'category'      => $category,
+        'image_url'     => $p['image_front_small_url'] ?? $p['image_url'] ?? '',
+        'quantity_info' => $p['quantity'] ?? '',
+        'nutriscore'    => $p['nutriscore_grade'] ?? '',
+        'ingredients'   => $ingredients,
+        'allergens'     => $allergens,
+        'conservation'  => $p['conservation_conditions_it'] ?? $p['conservation_conditions'] ?? '',
+        'origin'        => $p['origins_it'] ?? $p['origins'] ?? $p['manufacturing_places'] ?? '',
+        'nova_group'    => $p['nova_group'] ?? '',
+        'ecoscore'      => $p['ecoscore_grade'] ?? '',
+        'labels'        => $p['labels'] ?? '',
+        'stores'        => $p['stores'] ?? '',
+        'nutriments'    => $nutriments,
+    ];
+}
+
+function _parseAltFactsProductJson(?string $json): ?array {
+    if (!$json) {
+        return null;
+    }
+    $data = json_decode($json, true);
+    if (!isset($data['status']) || (int)$data['status'] !== 1 || empty($data['product'])) {
+        return null;
+    }
+    $p = $data['product'];
+    $altName = $p['product_name_it'] ?? $p['product_name'] ?? '';
+    if ($altName === '') {
+        return null;
+    }
+    $altCat = $p['categories_tags'][0] ?? end($p['categories_hierarchy'] ?? []) ?? '';
+    return [
+        'name'          => $altName,
+        'brand'         => $p['brands'] ?? '',
+        'category'      => $altCat,
+        'image_url'     => $p['image_front_small_url'] ?? $p['image_url'] ?? '',
+        'quantity_info' => $p['quantity'] ?? '',
+        'nutriscore' => '', 'ingredients' => '', 'allergens' => '',
+        'conservation' => '', 'origin' => '', 'nova_group' => '',
+        'ecoscore' => '', 'labels' => '', 'stores' => '',
+    ];
+}
+
+function _parseUpcItemDbJson(?string $json): ?array {
+    if (!$json) {
+        return null;
+    }
+    $data = json_decode($json, true);
+    if (empty($data['items'][0])) {
+        return null;
+    }
+    $item = $data['items'][0];
+    if (empty($item['title'])) {
+        return null;
+    }
+    return [
+        'name'      => $item['title'] ?? '',
+        'brand'     => $item['brand'] ?? '',
+        'category'  => $item['category'] ?? '',
+        'image_url' => $item['images'][0] ?? '',
+        'quantity_info' => '',
+        'nutriscore' => '', 'ingredients' => '', 'allergens' => '',
+        'conservation' => '', 'origin' => '', 'nova_group' => '',
+        'ecoscore' => '', 'labels' => '', 'stores' => '',
+    ];
+}
+
+/**
+ * Query all external barcode DBs in parallel (first wave per candidate, then Gemini).
+ */
+function barcodeResolveExternal(PDO $db, string $barcode): ?array {
+    $barcode = barcodeNormalizeDigits($barcode);
+    if ($barcode === '') {
+        return null;
+    }
+
+    $cached = barcodeCacheGet($db, $barcode);
+    if ($cached !== null) {
+        return $cached['found'] ? $cached : null;
+    }
+
+    $offFields = 'product_name,product_name_it,generic_name,generic_name_it,brands,categories_tags,categories_hierarchy,categories,image_front_small_url,image_url,quantity,nutriscore_grade,ingredients_text_it,ingredients_text,allergens_tags,conservation_conditions_it,conservation_conditions,origins_it,origins,manufacturing_places,nova_group,ecoscore_grade,labels,stores,nutriments';
+    $altFields = 'product_name,product_name_it,brands,categories_tags,categories_hierarchy,image_front_small_url,image_url,quantity';
+    $priority = ['off_it', 'off_world', 'opf', 'obf', 'upc'];
+
+    foreach (barcodeLookupCandidates($barcode) as $bc) {
+        $requests = [
+            'off_it'    => "https://world.openfoodfacts.org/api/v2/product/{$bc}.json?fields={$offFields}&lc=it",
+            'off_world' => "https://world.openfoodfacts.org/api/v2/product/{$bc}.json?fields={$offFields}",
+            'upc'       => "https://api.upcitemdb.com/prod/trial/lookup?upc={$bc}",
+            'opf'       => "https://world.openproductsfacts.org/api/v2/product/{$bc}.json?fields={$altFields}",
+            'obf'       => "https://world.openbeautyfacts.org/api/v2/product/{$bc}.json?fields={$altFields}",
+        ];
+        $bodies = barcodeHttpParallel($requests, 4);
+        foreach ($priority as $key) {
+            $body = $bodies[$key] ?? null;
+            $product = null;
+            $source = null;
+            if ($key === 'off_it' || $key === 'off_world') {
+                $product = _parseOffProductJson($body);
+                $source = $key === 'off_it' ? 'openfoodfacts_it' : 'openfoodfacts';
+            } elseif ($key === 'opf') {
+                $product = _parseAltFactsProductJson($body);
+                $source = 'openproductsfacts';
+            } elseif ($key === 'obf') {
+                $product = _parseAltFactsProductJson($body);
+                $source = 'openbeautyfacts';
+            } elseif ($key === 'upc') {
+                $product = _parseUpcItemDbJson($body);
+                $source = 'upcitemdb';
+            }
+            if ($product) {
+                $result = ['found' => true, 'source' => $source, 'product' => $product];
+                barcodeCacheSet($db, $barcode, $result, true);
+                return $result;
+            }
+        }
+    }
+
+    $apiKey = env('GEMINI_API_KEY');
+    if ($apiKey) {
+        $geminiProduct = _barcodeLookupGemini($barcode, $apiKey);
+        if ($geminiProduct !== null) {
+            $result = ['found' => true, 'source' => 'gemini', 'product' => $geminiProduct];
+            barcodeCacheSet($db, $barcode, $result, true);
+            return $result;
+        }
+    }
+
+    barcodeCacheSet($db, $barcode, ['found' => false, 'source' => 'miss'], false);
+    return null;
+}
+
+/** Local DB first, then parallel external lookup — single round-trip for the client. */
+function resolveBarcode(PDO $db): void {
+    $barcode = barcodeNormalizeDigits($_GET['barcode'] ?? '');
+    if ($barcode === '') {
+        echo json_encode(['found' => false, 'error' => 'No barcode provided']);
+        return;
+    }
+
+    $local = barcodeFindLocalProduct($db, $barcode);
+    if ($local) {
+        echo json_encode(['found' => true, 'source' => 'local', 'product' => $local], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+
+    $external = barcodeResolveExternal($db, $barcode);
+    if ($external) {
+        echo json_encode($external, JSON_UNESCAPED_UNICODE);
+        return;
+    }
+
+    echo json_encode(['found' => false, 'source' => 'none']);
 }
 
 /**
@@ -2256,187 +2578,22 @@ function stockForName(PDO $db): void {
     echo json_encode(['items' => $matches], JSON_UNESCAPED_UNICODE);
 }
 
-function _offFetchProduct(string $barcode): ?array {
-    $fields = 'product_name,product_name_it,generic_name,generic_name_it,brands,categories_tags,categories_hierarchy,categories,image_front_small_url,image_url,quantity,nutriscore_grade,ingredients_text_it,ingredients_text,allergens_tags,conservation_conditions_it,conservation_conditions,origins_it,origins,manufacturing_places,nova_group,ecoscore_grade,labels,stores,nutriments';
-
-    // Try candidate barcodes: given barcode + EAN-13 (UPC-A → prepend 0)
-    $candidates = [$barcode];
-    if (strlen($barcode) === 12 && ctype_digit($barcode)) {
-        $candidates[] = '0' . $barcode;
-    }
-    // Also try without leading zero if 13 digits starting with 0
-    if (strlen($barcode) === 13 && $barcode[0] === '0') {
-        $candidates[] = substr($barcode, 1);
-    }
-
-    // Locale preference: Italian first (better names), then world-neutral
-    $locales = ['lc=it', ''];
-
-    foreach ($candidates as $bc) {
-        foreach ($locales as $lc) {
-            $lcParam = $lc ? "&{$lc}" : '';
-            $url = "https://world.openfoodfacts.org/api/v2/product/{$bc}.json?fields={$fields}{$lcParam}";
-            $ctx = stream_context_create(['http' => ['timeout' => 8, 'header' => "User-Agent: EverShelf/1.0\r\n"]]);
-
-            $response = @file_get_contents($url, false, $ctx);
-            if ($response === false) {
-                // Network error: retry once after short delay
-                usleep(300000); // 0.3s
-                $response = @file_get_contents($url, false, $ctx);
-            }
-            if ($response === false) continue;
-
-            $data = json_decode($response, true);
-            if (!isset($data['status']) || $data['status'] !== 1 || empty($data['product'])) continue;
-
-            $p = $data['product'];
-
-            // Prefer Italian name, fall back to generic / any locale
-            $name = '';
-            foreach (['product_name_it', 'generic_name_it', 'product_name', 'generic_name'] as $f) {
-                if (!empty($p[$f])) { $name = $p[$f]; break; }
-            }
-
-            // Non-Latin script fallback
-            if (!empty($name) && preg_match('/[\x{0600}-\x{06FF}\x{0E00}-\x{0E7F}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}\x{0400}-\x{04FF}]/u', $name)) {
-                $latinName = '';
-                foreach (['generic_name_it', 'generic_name', 'product_name_it', 'product_name'] as $f) {
-                    if (!empty($p[$f]) && !preg_match('/[\x{0600}-\x{06FF}\x{0E00}-\x{0E7F}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}\x{0400}-\x{04FF}]/u', $p[$f])) {
-                        $latinName = $p[$f]; break;
-                    }
-                }
-                if (empty($latinName)) $latinName = !empty($p['brands']) ? $p['brands'] : 'Prodotto sconosciuto';
-                $name = $latinName;
-            }
-
-            $ingredients = $p['ingredients_text_it'] ?? $p['ingredients_text'] ?? '';
-            $catHierarchy = $p['categories_hierarchy'] ?? [];
-            $category = $p['categories_tags'][0] ?? (empty($catHierarchy) ? null : end($catHierarchy)) ?? $p['categories'] ?? '';
-            $allergens = '';
-            if (!empty($p['allergens_tags'])) {
-                $allergens = implode(', ', array_map(fn($a) => str_replace('en:', '', $a), $p['allergens_tags']));
-            }
-
-            // Extract macronutrients per 100g (from OFF 'nutriments' field)
-            $nutriments = null;
-            if (!empty($p['nutriments']) && is_array($p['nutriments'])) {
-                $nm = $p['nutriments'];
-                $nutriments = [
-                    'energy_kcal_100g' => isset($nm['energy-kcal_100g']) ? round((float)$nm['energy-kcal_100g'], 1) : (isset($nm['energy_100g']) ? round((float)$nm['energy_100g'] / 4.184, 1) : null),
-                    'proteins_100g'    => isset($nm['proteins_100g'])    ? round((float)$nm['proteins_100g'], 1)    : null,
-                    'carbohydrates_100g' => isset($nm['carbohydrates_100g']) ? round((float)$nm['carbohydrates_100g'], 1) : null,
-                    'fat_100g'         => isset($nm['fat_100g'])         ? round((float)$nm['fat_100g'], 1)         : null,
-                    'fiber_100g'       => isset($nm['fiber_100g'])       ? round((float)$nm['fiber_100g'], 1)       : null,
-                    'salt_100g'        => isset($nm['salt_100g'])        ? round((float)$nm['salt_100g'], 1)        : null,
-                ];
-                // Only keep if at least one macro is present
-                if (!array_filter(array_values($nutriments))) $nutriments = null;
-            }
-
-            return [
-                'name'          => $name,
-                'brand'         => $p['brands'] ?? '',
-                'category'      => $category,
-                'image_url'     => $p['image_front_small_url'] ?? $p['image_url'] ?? '',
-                'quantity_info' => $p['quantity'] ?? '',
-                'nutriscore'    => $p['nutriscore_grade'] ?? '',
-                'ingredients'   => $ingredients,
-                'allergens'     => $allergens,
-                'conservation'  => $p['conservation_conditions_it'] ?? $p['conservation_conditions'] ?? '',
-                'origin'        => $p['origins_it'] ?? $p['origins'] ?? $p['manufacturing_places'] ?? '',
-                'nova_group'    => $p['nova_group'] ?? '',
-                'ecoscore'      => $p['ecoscore_grade'] ?? '',
-                'labels'        => $p['labels'] ?? '',
-                'stores'        => $p['stores'] ?? '',
-                'nutriments'    => $nutriments,
-            ];
-        }
-    }
-    return null;
-}
-
 function lookupBarcode(): void {
-    $barcode = $_GET['barcode'] ?? '';
-    if (empty($barcode)) {
+    $barcode = barcodeNormalizeDigits($_GET['barcode'] ?? '');
+    if ($barcode === '') {
         EverLog::info('lookupBarcode');
         echo json_encode(['found' => false, 'error' => 'No barcode provided']);
         return;
     }
 
-    // 1. Try Open Food Facts (multi-barcode, multi-locale, with auto-retry on network errors)
-    $offProduct = _offFetchProduct($barcode);
-    if ($offProduct !== null) {
-        echo json_encode(['found' => true, 'source' => 'openfoodfacts', 'product' => $offProduct]);
+    $db = getDB();
+    $external = barcodeResolveExternal($db, $barcode);
+    if ($external) {
+        echo json_encode($external, JSON_UNESCAPED_UNICODE);
         return;
     }
 
-    // 2. Try UPC Item DB as fallback
-    $candidates = [$barcode];
-    if (strlen($barcode) === 12 && ctype_digit($barcode)) $candidates[] = '0' . $barcode;
-    foreach ($candidates as $bc) {
-        $url2 = "https://api.upcitemdb.com/prod/trial/lookup?upc={$bc}";
-        $ctx2 = stream_context_create(['http' => ['timeout' => 8, 'header' => "User-Agent: EverShelf/1.0\r\n"]]);
-        $r2 = @file_get_contents($url2, false, $ctx2);
-        if ($r2 !== false) {
-            $d2 = json_decode($r2, true);
-            if (!empty($d2['items'][0])) {
-                $item = $d2['items'][0];
-                echo json_encode(['found' => true, 'source' => 'upcitemdb', 'product' => [
-                    'name'      => $item['title'] ?? '',
-                    'brand'     => $item['brand'] ?? '',
-                    'category'  => $item['category'] ?? '',
-                    'image_url' => $item['images'][0] ?? '',
-                ]]);
-                return;
-            }
-        }
-    }
-
-    // 3. Try Open Products Facts (non-food household items) and Open Beauty Facts (cosmetics)
-    $altBases = [
-        'https://world.openproductsfacts.org',
-        'https://world.openbeautyfacts.org',
-    ];
-    $altFields = 'product_name,product_name_it,brands,categories_tags,categories_hierarchy,image_front_small_url,image_url,quantity';
-    $altCandidates = [$barcode];
-    if (strlen($barcode) === 12 && ctype_digit($barcode)) $altCandidates[] = '0' . $barcode;
-    foreach ($altBases as $altBase) {
-        foreach ($altCandidates as $bc) {
-            $altUrl = "{$altBase}/api/v2/product/{$bc}.json?fields={$altFields}";
-            $altCtx = stream_context_create(['http' => ['timeout' => 6, 'header' => "User-Agent: EverShelf/1.0\r\n"]]);
-            $altR = @file_get_contents($altUrl, false, $altCtx);
-            if ($altR === false) continue;
-            $altD = json_decode($altR, true);
-            if (!isset($altD['status']) || $altD['status'] !== 1 || empty($altD['product'])) continue;
-            $p = $altD['product'];
-            $altName = $p['product_name_it'] ?? $p['product_name'] ?? '';
-            if (empty($altName)) continue;
-            $altCat = $p['categories_tags'][0] ?? end($p['categories_hierarchy'] ?? []) ?? '';
-            echo json_encode(['found' => true, 'source' => $altBase, 'product' => [
-                'name'          => $altName,
-                'brand'         => $p['brands'] ?? '',
-                'category'      => $altCat,
-                'image_url'     => $p['image_front_small_url'] ?? $p['image_url'] ?? '',
-                'quantity_info' => $p['quantity'] ?? '',
-                'nutriscore' => '', 'ingredients' => '', 'allergens' => '',
-                'conservation' => '', 'origin' => '', 'nova_group' => '',
-                'ecoscore' => '', 'labels' => '', 'stores' => '',
-            ]]);
-            return;
-        }
-    }
-
-    // 4. Gemini AI as last resort — works for well-known products not in any open DB
-    $apiKey = env('GEMINI_API_KEY');
-    if ($apiKey) {
-        $geminiProduct = _barcodeLookupGemini($barcode, $apiKey);
-        if ($geminiProduct !== null) {
-            echo json_encode(['found' => true, 'source' => 'gemini', 'product' => $geminiProduct]);
-            return;
-        }
-    }
-
-    echo json_encode(['found' => false, 'source' => 'openfoodfacts']);
+    echo json_encode(['found' => false, 'source' => 'none']);
 }
 
 /**
@@ -2509,10 +2666,12 @@ function saveProduct(PDO $db): void {
         ? $input['shopping_name']
         : computeShoppingName($input['name'], $input['category'] ?? '', $input['brand'] ?? '');
 
+    $barcode = normalizeProductBarcode($input['barcode'] ?? null);
+
     $id = !empty($input['id']) ? (int)$input['id'] : 0;
     $merged = false;
     if (!$id) {
-        $dupId = findDuplicateProductId($db, $input['name'], $input['brand'] ?? '', $input['barcode'] ?? null, null);
+        $dupId = findDuplicateProductId($db, $input['name'], $input['brand'] ?? '', $barcode, null);
         if ($dupId) {
             $id = $dupId;
             $merged = true;
@@ -2532,7 +2691,7 @@ function saveProduct(PDO $db): void {
             $input['name'], $input['brand'] ?? '', $input['category'] ?? '',
             $input['image_url'] ?? '', $input['unit'] ?? 'pz',
             $input['default_quantity'] ?? 1, $input['notes'] ?? '',
-            $input['barcode'] ?? null, $input['package_unit'] ?? '',
+            $barcode, $input['package_unit'] ?? '',
             $shoppingName, $nutriJson, $id
         ]);
         echo json_encode(['success' => true, 'id' => $id, 'merged' => $merged]);
@@ -2542,7 +2701,6 @@ function saveProduct(PDO $db): void {
             INSERT INTO products (barcode, name, brand, category, image_url, unit, default_quantity, notes, package_unit, shopping_name, nutriments_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $barcode = !empty($input['barcode']) ? $input['barcode'] : null;
         $nutriJson = isset($input['nutriments']) ? json_encode($input['nutriments']) : null;
         $stmt->execute([
             $barcode, $input['name'], $input['brand'] ?? '',
@@ -2850,6 +3008,7 @@ function addToInventory(PDO $db): void {
     }
     
     $vacuumSealed = (int)($input['vacuum_sealed'] ?? 0);
+    $expiryUserSet = (int)($input['expiry_user_set'] ?? 0);
     
     // Check if a SEALED (not yet opened) row exists for this product+location.
     // We merge new stock into a sealed row only — never into an already-opened
@@ -2866,13 +3025,13 @@ function addToInventory(PDO $db): void {
     if ($existing) {
         // Merge into the existing sealed row
         $newQty = $existing['quantity'] + $quantity;
-        $stmt = $db->prepare("UPDATE inventory SET quantity = ?, expiry_date = COALESCE(?, expiry_date), vacuum_sealed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-        $stmt->execute([$newQty, $expiry, $vacuumSealed, $existing['id']]);
+        $stmt = $db->prepare("UPDATE inventory SET quantity = ?, expiry_date = COALESCE(?, expiry_date), vacuum_sealed = ?, expiry_user_set = CASE WHEN ? = 1 THEN 1 ELSE expiry_user_set END, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        $stmt->execute([$newQty, $expiry, $vacuumSealed, $expiryUserSet, $existing['id']]);
     } else {
         $newQty = $quantity;
         // All existing rows (if any) are opened packs — insert a new sealed row
-        $stmt = $db->prepare("INSERT INTO inventory (product_id, location, quantity, expiry_date, vacuum_sealed) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$productId, $location, $quantity, $expiry, $vacuumSealed]);
+        $stmt = $db->prepare("INSERT INTO inventory (product_id, location, quantity, expiry_date, vacuum_sealed, expiry_user_set) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$productId, $location, $quantity, $expiry, $vacuumSealed, $expiryUserSet]);
     }
     
     // Get total across all locations
@@ -3331,6 +3490,7 @@ function updateInventory(PDO $db): void {
     if (isset($input['quantity'])) { $fields[] = "quantity = ?"; $params[] = $input['quantity']; }
     if (isset($input['location'])) { $fields[] = "location = ?"; $params[] = $input['location']; }
     if (isset($input['expiry_date'])) { $fields[] = "expiry_date = ?"; $params[] = $input['expiry_date'] ?: null; }
+    if (array_key_exists('expiry_user_set', $input)) { $fields[] = "expiry_user_set = ?"; $params[] = (int)$input['expiry_user_set']; }
     if (isset($input['vacuum_sealed'])) { $fields[] = "vacuum_sealed = ?"; $params[] = (int)$input['vacuum_sealed']; }
     if (isset($input['opened_at_clear']) && $input['opened_at_clear']) { $fields[] = "opened_at = NULL"; }
     $fields[] = "updated_at = CURRENT_TIMESTAMP";
@@ -3430,6 +3590,14 @@ function deleteInventory(PDO $db): void {
 function productQtyThreshold(string $unit): float {
     static $thresholds = ['g' => 20, 'ml' => 20, 'kg' => 0.02, 'l' => 0.02, 'conf' => 0.1, 'pz' => 0.5];
     return $thresholds[$unit] ?? 0.5;
+}
+
+function normalizeProductBarcode($barcode): ?string {
+    if ($barcode === null) {
+        return null;
+    }
+    $barcode = trim((string)$barcode);
+    return $barcode === '' ? null : $barcode;
 }
 
 function normalizeProductName(string $name): string {
@@ -7675,8 +7843,24 @@ function productMatchesShoppingFamily(string $productName, string $shoppingName)
     return $nameLower === $sn || str_starts_with($nameLower, $sn . ' ');
 }
 
+/** Rice/pasta prepared salads (Ponti etc.) — not fresh leafy salad. */
+function isPreparedSaladProduct(string $name, string $brand = ''): bool {
+    $n = mb_strtolower(trim($name));
+    $b = mb_strtolower(trim($brand));
+    if (preg_match('/insalata\s+di\s+(riso|pasta|farro|orzo|couscous|quinoa|bulgur|cereali|legumi)\b/u', $n)) {
+        return true;
+    }
+    if (preg_match('/\binsalata\b/u', $n) && preg_match('/\b(ponti|rio mare|orogel|findus|star)\b/u', $b)) {
+        return true;
+    }
+    return false;
+}
+
 function computeShoppingName(string $name, string $category = '', string $brand = ''): string {
     $lower = mb_strtolower(trim($name));
+    if (isPreparedSaladProduct($name, $brand) && !preg_match('/insalata\s+di\s+riso/u', $lower)) {
+        return 'Insalata di riso';
+    }
     $stop = ['di','del','della','dei','degli','delle','da','in','con','per','su',
              'a','e','il','lo','la','i','gli','le','un','uno','una','al','alle','agli','allo',
              'parzialmente','scremato','uht','bio','light','freschi','fresca','fresco'];
@@ -7773,6 +7957,13 @@ function computeShoppingName(string $name, string $category = '', string $brand 
         'aroma limone'          => 'Ingredienti Spezie',
         'aroma rum'             => 'Ingredienti Spezie',
         'aroma arancia'         => 'Ingredienti Spezie',
+        // Prepared salads (not fresh greens)
+        'insalata di riso'      => 'Insalata di riso',
+        'insalata di pasta'     => 'Insalata di pasta',
+        'insalata di farro'     => 'Insalata di farro',
+        'insalata di orzo'      => 'Insalata di orzo',
+        'insalata di couscous'  => 'Insalata di couscous',
+        'insalata di quinoa'    => 'Insalata di quinoa',
     ];
     foreach ($phraseMap as $phrase => $canonical) {
         if (mb_strpos($lower, $phrase) !== false) {
@@ -10916,17 +11107,21 @@ function familySiblingSuggest(PDO $db): void {
         return;
     }
 
-    $stockQty = (float)$sibling['stock_qty'];
-    $unit = $sibling['unit'] ?: 'pz';
-    $displayQty = $stockQty;
-    $displayUnit = $unit;
-    $pkgUnit = strtolower($sibling['package_unit'] ?? '');
-    $defQty = (float)($sibling['default_quantity'] ?? 0);
-    if ($unit === 'conf' && $defQty > 0 && in_array($pkgUnit, ['g', 'ml', 'kg', 'l', 'lt'], true)) {
-        $mult = in_array($pkgUnit, ['kg', 'l', 'lt'], true) ? 1000 : 1;
-        $displayQty = round($stockQty * $defQty * $mult, $pkgUnit === 'g' || $pkgUnit === 'ml' ? 0 : 2);
-        $displayUnit = in_array($pkgUnit, ['kg', 'l', 'lt'], true) ? ($pkgUnit === 'kg' ? 'g' : 'ml') : $pkgUnit;
+    $inventoryId = (int)($sibling['inventory_id'] ?? 0);
+    if ($inventoryId <= 0) {
+        echo json_encode(['success' => true, 'sibling' => null]);
+        return;
     }
+    $invChk = $db->prepare("SELECT quantity FROM inventory WHERE id = ? AND quantity > 0.001");
+    $invChk->execute([$inventoryId]);
+    $liveQty = $invChk->fetchColumn();
+    if ($liveQty === false) {
+        echo json_encode(['success' => true, 'sibling' => null]);
+        return;
+    }
+
+    $stockQty = (float)$liveQty;
+    $unit = $sibling['unit'] ?: 'pz';
 
     echo json_encode([
         'success' => true,
@@ -10937,8 +11132,10 @@ function familySiblingSuggest(PDO $db): void {
             'brand' => $sibling['brand'] ?? '',
             'category' => $sibling['category'] ?? '',
             'image_url' => $sibling['image_url'] ?? '',
-            'stock_qty' => round($displayQty, 2),
-            'unit' => $displayUnit,
+            'stock_qty' => round($stockQty, 3),
+            'unit' => $unit,
+            'default_quantity' => (float)($sibling['default_quantity'] ?? 0),
+            'package_unit' => $sibling['package_unit'] ?? '',
             'family' => $sName,
             'location' => $location,
             'added_at' => $sibling['added_at'] ?? null,

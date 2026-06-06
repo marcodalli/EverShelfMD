@@ -1108,7 +1108,7 @@ async function discoverScaleGateway() {
 }
 
 // ===== i18n TRANSLATION SYSTEM =====
-const _I18N_VERSION = '20260606b'; // bump when translations change
+const _I18N_VERSION = '20260606n'; // bump when translations change
 let _i18nStrings = null;   // current language translations (flat)
 let _i18nFallback = null;  // Italian fallback (flat)
 let _i18nLoadedVersion = null;
@@ -1382,9 +1382,9 @@ const URGENCY_BG = {
 };
 
 // Map Open Food Facts categories to local categories
-function mapToLocalCategory(ofCategory, productName) {
+function mapToLocalCategory(ofCategory, productName, productBrand = '') {
     if (!ofCategory) {
-        return guessCategoryFromName(productName || '');
+        return guessCategoryFromName(productName || '', productBrand || '');
     }
     const cat = ofCategory.toLowerCase();
     // Direct match with our local keys — but NOT 'altro': fall through to name guess
@@ -1395,7 +1395,7 @@ function mapToLocalCategory(ofCategory, productName) {
     // Handle specific Open Food Facts tags FIRST (before generic regex)
     // "plant-based-foods-and-beverages" is a catch-all — use product name to decide
     if (/plant-based-foods/.test(cat)) {
-        return guessCategoryFromName(productName || '');
+        return guessCategoryFromName(productName || '', productBrand || '');
     }
     // "beverages-and-beverages-preparations" = actual beverages
     if (/^en:beverages/.test(cat)) return 'bevande';
@@ -1413,7 +1413,10 @@ function mapToLocalCategory(ofCategory, productName) {
     if (/meat|viande|carne|sausage|salum|prosciutt/.test(cat)) return 'carne';
     if (/fish|poisson|pesce|seafood|tuna|tonno|salmone/.test(cat)) return 'pesce';
     if (/fruit|frutta|juice|succo|apple|banana/.test(cat)) return 'frutta';
-    if (/vegetable|verdur|legum|salad|insalat|tomato|pomodor/.test(cat)) return 'verdura';
+    if (/salad|insalat/.test(cat)) {
+        return _isPreparedSaladName(productName, productBrand) ? 'pasta' : 'verdura';
+    }
+    if (/vegetable|verdur|legum|tomato|pomodor/.test(cat)) return 'verdura';
     if (/pasta|rice|riso|noodle|spaghetti|penne|grain/.test(cat)) return 'pasta';
     if (/bread|pane|forno|biscott|toast|cracker|grissini|fette/.test(cat)) return 'pane';
     if (/frozen|surgelé|surgel|gelat/.test(cat)) return 'surgelati';
@@ -1426,15 +1429,26 @@ function mapToLocalCategory(ofCategory, productName) {
     // Beverage check LAST (to avoid false matches on compound tags)
     if (/^(?!.*plant-based).*(beverage|drink|boisson|bevand|water|acqua|beer|birra|wine|vino|coffee|caffè|tea\b)/.test(cat)) return 'bevande';
     // Last resort: try product name before giving up
-    const nameGuess = guessCategoryFromName(productName || '');
+    const nameGuess = guessCategoryFromName(productName || '', productBrand || '');
     if (nameGuess !== 'altro') return nameGuess;
     return 'altro';
 }
 
+/** Prepared rice/pasta salads — not fresh leafy salad (verdura). */
+function _isPreparedSaladName(name, brand = '') {
+    const n = (name || '').toLowerCase();
+    const b = (brand || '').toLowerCase();
+    if (/insalata\s+di\s+(riso|pasta|farro|orzo|couscous|quinoa|bulgur|cereali|legumi)\b/.test(n)) return true;
+    if (/\b(riso|pasta)\s+con\b/.test(n) && /\binsalata\b/.test(n)) return true;
+    if (/\binsalata\b/.test(n) && /\b(ponti|rio mare|orogel|findus|star)\b/.test(b)) return true;
+    return false;
+}
+
 // Guess a local category purely from product name
-function guessCategoryFromName(name) {
+function guessCategoryFromName(name, brand = '') {
     if (!name) return 'altro';
     const n = name.toLowerCase();
+    if (_isPreparedSaladName(n, brand)) return 'pasta';
     // ── Known Italian brand names → direct category (fast-path before regex)
     // "Uno" only if it starts the name (Bahlsen biscuits, not the Italian word)
     if (/^uno\b/.test(n)) return 'snack';
@@ -1712,6 +1726,7 @@ function estimateExpiryDays(product, location) {
     else if (/uova/.test(name)) days = 28;
     else if (/pane\s+fresco|pane\s+in\s+cassetta/.test(name)) days = 5;
     else if (/pane\s+confezionato|pan\s+carr|pancarrè/.test(name)) days = 14;
+    else if (/insalata\s+di\s+(riso|pasta|farro|orzo|couscous)/.test(name)) days = 7;
     else if (/insalata|rucola|spinaci\s+freschi/.test(name)) days = 5;
     else if (/pollo|tacchino|maiale|manzo|vitello|sovracosci|cosci/.test(name)) days = 3;
     else if (/salmone|tonno\s+fresco|pesce/.test(name) && !/tonno\s+in\s+scatola|tonno\s+rio/.test(name)) days = 2;
@@ -1854,6 +1869,7 @@ function estimateOpenedExpiryDays(product, location) {
     if (/\b(pollo|tacchino|maiale|manzo|vitello|agnello)\b/.test(name)) return 2;
     if (/salmone|tonno\s+fresco|pesce(?!\s+in)/.test(name)) return 2;
     if (/\b(passata|pelati|polpa|sugo|salsa\s+di\s+pomodoro)\b/.test(name)) return 5;
+    if (/insalata\s+di\s+(riso|pasta|farro|orzo|couscous)/.test(name)) return 7;
     if (/insalata|rucola|spinaci|lattuga|crescione|germogli/.test(name)) return 4;
     if (/\b(succo|spremuta)\b/.test(name)) return 3;
     if (/\b(birra|beer)\b/.test(name)) return 3;
@@ -2042,8 +2058,15 @@ function addToScanRecents(product) {
     _saveToServer('scan_history', list);
 }
 
-function updateScanRecents() {
-    const list = (_scanHistoryCache || []).slice(0, 6);
+async function updateScanRecents() {
+    let list = (_scanHistoryCache || []).slice(0, 6);
+    if (_spesaMode && list.length > 0) {
+        try {
+            const data = await api('inventory_list');
+            const stocked = new Set((data.inventory || []).filter(i => parseFloat(i.quantity) > 0).map(i => i.product_id));
+            list = list.filter(r => stocked.has(r.id));
+        } catch (_) { /* keep list on error */ }
+    }
     const wrap = document.getElementById('scan-recents');
     const chips = document.getElementById('scan-recents-chips');
     if (!wrap || !chips) return;
@@ -2058,9 +2081,23 @@ function updateScanRecents() {
     }).join('');
 }
 
+async function _productHasLiveStock(productId) {
+    try {
+        const data = await api('inventory_list');
+        return (data.inventory || []).some(i => i.product_id == productId && parseFloat(i.quantity) > 0);
+    } catch (_) {
+        return true;
+    }
+}
+
 async function _selectRecentProduct(productId) {
     showLoading(true);
     try {
+        if (_spesaMode && !(await _productHasLiveStock(productId))) {
+            showLoading(false);
+            showToast(t('error.not_in_inventory'), 'error');
+            return;
+        }
         const data = await api('product_get', { id: productId });
         if (data.product) {
             currentProduct = data.product;
@@ -2251,9 +2288,9 @@ function _showAiMatchChoices(aiProduct) {
     const aiName = aiProduct?.name || t('product.not_recognized');
     const aiBrand = aiProduct?.brand || '';
     const catIcon = CATEGORY_ICONS[mapToLocalCategory(aiProduct?.category || '', aiName)] || '📦';
-    const inStock = _aiInventoryCandidates || [];
-    const finished = _aiFinishedCandidates || [];
-    const catalog = _aiCatalogCandidates || [];
+    const inStock = (_aiInventoryCandidates || []).filter(i => parseFloat(i.total_qty) > 0);
+    const finished = _spesaMode ? [] : (_aiFinishedCandidates || []);
+    const catalog = _spesaMode ? [] : (_aiCatalogCandidates || []);
     const hasMatches = inStock.length + finished.length + catalog.length > 0;
     const addLabel = t('scan.ai_match_add_btn').replace('{name}', aiName);
 
@@ -2367,11 +2404,18 @@ async function _selectAiProductCandidate(kind, idx) {
             if (pesoMatch) currentProduct.weight_info = pesoMatch[1].trim();
         }
         currentProduct._confCount = 0;
+        const hasStock = kind === 'stock' ? await _productHasLiveStock(p.id) : false;
         addToScanRecents(currentProduct);
         _clearAiMatchPanel();
         showLoading(false);
-        if (kind === 'finished') {
-            showToast(t('scan.ai_match_finished_hint'), 'info');
+        if (kind !== 'stock' || !hasStock) {
+            if (_spesaMode || kind === 'stock') {
+                showToast(t('error.not_in_inventory'), 'info');
+            } else if (kind === 'finished') {
+                showToast(t('scan.ai_match_finished_hint'), 'info');
+            }
+            setTimeout(() => showAddForm(), 250);
+            return;
         }
         setTimeout(() => showProductAction(), 250);
     } catch (err) {
@@ -2613,6 +2657,7 @@ async function syncSettingsFromDB() {
             if (srv.auto_added_bring)    _autoAddedBringCache    = srv.auto_added_bring;
             if (srv.bring_blocklist)     _bringBlocklistCache    = srv.bring_blocklist;
             if (srv.no_expiry_dismissed) _noExpiryDismissedCache = srv.no_expiry_dismissed;
+            if (srv.family_sibling_confirmed) _familySiblingConfirmedCache = srv.family_sibling_confirmed;
 
             // ── One-time migration: if server has nothing yet, seed from old localStorage ──
             if (!srv.shopping_tags) {
@@ -5309,6 +5354,7 @@ let _prefMoveLocCache      = {};
 let _autoAddedBringCache   = {};
 let _bringBlocklistCache   = {};
 let _noExpiryDismissedCache = {};
+let _familySiblingConfirmedCache = {};
 let _scanHistoryCache      = [];
 function _saveToServer(key, value) {
     api('app_settings_save', {}, 'POST', { settings: { [key]: value } }).catch(() => {});
@@ -6772,7 +6818,32 @@ async function _discardAllFromModal(inventoryId) {
     }
 }
 
+/** Track manual expiry edits — auto-recalc on location/vacuum must not overwrite user dates. */
+function _initExpiryManualTracking(inputId, item) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    if (item?.expiry_user_set) el.dataset.manuallySet = 'true';
+    else delete el.dataset.manuallySet;
+    if (el.dataset.expiryTrackBound) return;
+    el.dataset.expiryTrackBound = '1';
+    const mark = () => {
+        if (el.value) el.dataset.manuallySet = 'true';
+        else delete el.dataset.manuallySet;
+    };
+    el.addEventListener('input', mark);
+    el.addEventListener('change', mark);
+}
+
+function _isExpiryManuallySet(inputId) {
+    return document.getElementById(inputId)?.dataset.manuallySet === 'true';
+}
+
+function _expiryUserSetPayload(inputId) {
+    return _isExpiryManuallySet(inputId) ? 1 : 0;
+}
+
 function recalcEditExpiry(locInputId, vacuumInputId, expiryInputId) {
+    if (_isExpiryManuallySet(expiryInputId)) return;
     const product = window._editingProduct;
     if (!product) return;
     const loc = document.getElementById(locInputId)?.value || '';
@@ -6879,6 +6950,7 @@ function editInventoryItem(id) {
         </form>
     `;
     document.getElementById('modal-overlay').style.display = 'flex';
+    _initExpiryManualTracking('edit-expiry', item);
 }
 
 function onEditUnitChange() {
@@ -6929,7 +7001,8 @@ async function submitEditInventory(e, id, productId) {
     }
 
     const payload = { id, quantity: qty, location: loc, expiry_date: expiry, unit, product_id: productId,
-        vacuum_sealed: document.getElementById('edit-vacuum')?.checked ? 1 : 0 };
+        vacuum_sealed: document.getElementById('edit-vacuum')?.checked ? 1 : 0,
+        expiry_user_set: _expiryUserSetPayload('edit-expiry') };
     
     // Add package info if conf
     if (unit === 'conf') {
@@ -7104,6 +7177,45 @@ function _setScanStatus(msg, state, method) {
 }
 
 // ===== BARCODE ENGINE INIT (Native + ZBar WASM) =====
+let _zbarVendorPromise = null;
+
+/** Lazy-load ZBar WASM (skipped at page load on kiosk WebView to reduce OOM risk). */
+function _loadZbarVendor() {
+    if (typeof barcodeDetectorPolyfill !== 'undefined') return Promise.resolve();
+    if (_zbarVendorPromise) return _zbarVendorPromise;
+    _zbarVendorPromise = new Promise((resolve, reject) => {
+        const done = () => {
+            if (typeof barcodeDetectorPolyfill !== 'undefined') resolve();
+            else reject(new Error('ZBar polyfill unavailable'));
+        };
+        const loadPoly = () => {
+            const s2 = document.createElement('script');
+            s2.src = 'assets/vendor/zbar/polyfill.js?v=20260606a';
+            s2.onload = done;
+            s2.onerror = () => reject(new Error('ZBar polyfill load failed'));
+            document.head.appendChild(s2);
+        };
+        if (window.zbarWasm) {
+            loadPoly();
+            return;
+        }
+        const s1 = document.createElement('script');
+        s1.src = 'assets/vendor/zbar/index.js?v=20260606a';
+        s1.onload = () => {
+            if (window.zbarWasm && zbarWasm.setModuleArgs) {
+                zbarWasm.setModuleArgs({ locateFile: (file) => 'assets/vendor/zbar/' + file });
+            }
+            loadPoly();
+        };
+        s1.onerror = () => reject(new Error('ZBar WASM load failed'));
+        document.head.appendChild(s1);
+    }).catch(err => {
+        _zbarVendorPromise = null;
+        throw err;
+    });
+    return _zbarVendorPromise;
+}
+
 function _startBestScanner(videoEl) {
     if (_detectorNative || _detectorZbar) {
         startUnifiedScanner(videoEl);
@@ -7131,6 +7243,11 @@ function _ensureBarcodeEngines() {
                 }
             } catch (e) {
                 scanLog(`Native BarcodeDetector init failed: ${e.message}`);
+            }
+        }
+        if (typeof barcodeDetectorPolyfill === 'undefined') {
+            try { await _loadZbarVendor(); } catch (e) {
+                scanLog(`ZBar vendor load failed: ${e.message}`);
             }
         }
         if (typeof barcodeDetectorPolyfill !== 'undefined') {
@@ -7628,135 +7745,158 @@ function stopScanner() {
     if (aiVideo) aiVideo.srcObject = null;
 }
 
+const _barcodeSessionCache = new Map();
+
+function _barcodeCacheKey(barcode) {
+    return String(barcode || '').replace(/\D/g, '');
+}
+
+/** Fix unit/qty from stored notes; fire-and-forget DB update when needed. */
+function _applyLocalBarcodeProductFixes(product) {
+    if (!product) return;
+    if (product.unit === 'pz' && product.default_quantity === 0 && product.notes) {
+        const pesoMatch = product.notes.match(/Peso:\s*([^·]+)/);
+        if (pesoMatch) {
+            const weightStr = pesoMatch[1].trim();
+            const detected = detectUnitAndQuantity(weightStr);
+            if (detected.unit !== 'pz') {
+                product.unit = detected.unit;
+                product.default_quantity = detected.quantity;
+                product.weight_info = weightStr;
+                if (detected.packageUnit) product.package_unit = detected.packageUnit;
+                if (detected.confCount) product._confCount = detected.confCount;
+                api('product_save', {}, 'POST', {
+                    id: product.id,
+                    barcode: product.barcode,
+                    name: product.name,
+                    brand: product.brand || '',
+                    category: product.category || '',
+                    image_url: product.image_url || '',
+                    unit: detected.unit,
+                    default_quantity: detected.quantity,
+                    package_unit: detected.packageUnit || '',
+                    notes: product.notes,
+                }).catch(() => {});
+            }
+        }
+    }
+    if (!product.weight_info && product.notes) {
+        const pesoMatch = product.notes.match(/Peso:\s*([^·]+)/);
+        if (pesoMatch) product.weight_info = pesoMatch[1].trim();
+    }
+    if (product.weight_info && product.unit === 'conf' && !product._confCount) {
+        const detected = detectUnitAndQuantity(product.weight_info);
+        if (detected.confCount) product._confCount = detected.confCount;
+    }
+}
+
+function _externalBarcodeNotes(p) {
+    const notesParts = [];
+    if (p.quantity_info) notesParts.push(`${t('product.weight_label')}: ${p.quantity_info}`);
+    if (p.nutriscore) notesParts.push(`Nutriscore: ${p.nutriscore.toUpperCase()}`);
+    if (p.nova_group) notesParts.push(`NOVA: ${p.nova_group}`);
+    if (p.ecoscore) notesParts.push(`Ecoscore: ${p.ecoscore.toUpperCase()}`);
+    if (p.origin) notesParts.push(`${t('product.origin_label')}: ${p.origin}`);
+    if (p.labels) notesParts.push(`${t('product.labels_label')}: ${p.labels}`);
+    return notesParts.join(' · ');
+}
+
+function _currentProductFromExternal(p, barcode, saveId) {
+    const detected = detectUnitAndQuantity(p.quantity_info);
+    return {
+        id: saveId,
+        barcode: barcode,
+        name: p.name || t('product.not_recognized'),
+        brand: p.brand || '',
+        category: p.category || '',
+        image_url: p.image_url || '',
+        unit: detected.unit,
+        default_quantity: detected.quantity,
+        package_unit: detected.packageUnit || '',
+        _confCount: detected.confCount || 0,
+        weight_info: p.quantity_info || '',
+        nutriscore: p.nutriscore || '',
+        ingredients: p.ingredients || '',
+        allergens: p.allergens || '',
+        conservation: p.conservation || '',
+        origin: p.origin || '',
+        nova_group: p.nova_group || '',
+        ecoscore: p.ecoscore || '',
+        labels: p.labels || '',
+        stores: p.stores || '',
+    };
+}
+
+function _finishBarcodeResolved(barcode) {
+    showLoading(false);
+    addToScanRecents(currentProduct);
+    _showScanConfirm(currentProduct.name);
+    stopScanner();
+    const delay = _spesaMode ? 120 : 300;
+    const next = _spesaMode ? showAddForm : showProductAction;
+    setTimeout(() => next(), delay);
+}
+
+async function _resolveBarcodeLookup(barcode) {
+    const key = _barcodeCacheKey(barcode);
+    if (_barcodeSessionCache.has(key)) {
+        return _barcodeSessionCache.get(key);
+    }
+    const result = await api('resolve_barcode', { barcode: key });
+    _barcodeSessionCache.set(key, result);
+    return result;
+}
+
+async function _handleBarcodeResolve(result, barcode) {
+    const code = _barcodeCacheKey(barcode);
+    if (!result?.found) return false;
+
+    if (result.source === 'local' && result.product) {
+        currentProduct = result.product;
+        _applyLocalBarcodeProductFixes(currentProduct);
+        _finishBarcodeResolved(code);
+        return true;
+    }
+
+    if (result.product) {
+        const p = result.product;
+        const detected = detectUnitAndQuantity(p.quantity_info);
+        const saveResult = await api('product_save', {}, 'POST', {
+            barcode: code,
+            name: p.name || t('product.not_recognized'),
+            brand: p.brand || '',
+            category: p.category || '',
+            image_url: p.image_url || '',
+            unit: detected.unit,
+            default_quantity: detected.quantity,
+            package_unit: detected.packageUnit || '',
+            notes: _externalBarcodeNotes(p),
+        });
+        if (saveResult.id) {
+            currentProduct = _currentProductFromExternal(p, code, saveResult.id);
+            _finishBarcodeResolved(code);
+            return true;
+        }
+    }
+    return false;
+}
+
 async function onBarcodeDetected(barcode) {
     _dismissFamilySiblingPrompt();
     _resetAiFallbackForNewScan();
     showLoading(true);
-    
-    // Vibrate if available
+
     if (navigator.vibrate) navigator.vibrate(100);
-    
+
     try {
-        // First check local DB
-        const localResult = await api('search_barcode', { barcode });
-        if (localResult.found) {
-            currentProduct = localResult.product;
-            // If product was saved with 'pz' but has weight info in notes, fix defaults.
-            // Only run if default_quantity === 0 (strictly unset): a value of 1 or higher
-            // means the user (or a previous auto-detect pass) already confirmed the unit,
-            // and re-running here would undo manual corrections.
-            if (currentProduct.unit === 'pz' && currentProduct.default_quantity === 0 && currentProduct.notes) {
-                const pesoMatch = currentProduct.notes.match(/Peso:\s*([^·]+)/);
-                if (pesoMatch) {
-                    const weightStr = pesoMatch[1].trim();
-                    const detected = detectUnitAndQuantity(weightStr);
-                    if (detected.unit !== 'pz') {
-                        currentProduct.unit = detected.unit;
-                        currentProduct.default_quantity = detected.quantity;
-                        currentProduct.weight_info = weightStr;
-                        if (detected.packageUnit) currentProduct.package_unit = detected.packageUnit;
-                        if (detected.confCount) currentProduct._confCount = detected.confCount;
-                        // Update product in DB for future scans
-                        api('product_save', {}, 'POST', {
-                            id: currentProduct.id,
-                            barcode: currentProduct.barcode,
-                            name: currentProduct.name,
-                            brand: currentProduct.brand || '',
-                            category: currentProduct.category || '',
-                            image_url: currentProduct.image_url || '',
-                            unit: detected.unit,
-                            default_quantity: detected.quantity,
-                            package_unit: detected.packageUnit || '',
-                            notes: currentProduct.notes,
-                        });
-                    }
-                }
-            }
-            // Extract weight_info from notes if available (stored as "Peso: 500 g · ...")
-            if (!currentProduct.weight_info && currentProduct.notes) {
-                const pesoMatch = currentProduct.notes.match(/Peso:\s*([^·]+)/);
-                if (pesoMatch) currentProduct.weight_info = pesoMatch[1].trim();
-            }
-            // Detect confCount from weight_info for multipack pre-fill
-            if (currentProduct.weight_info && currentProduct.unit === 'conf' && !currentProduct._confCount) {
-                const detected = detectUnitAndQuantity(currentProduct.weight_info);
-                if (detected.confCount) currentProduct._confCount = detected.confCount;
-            }
-            showLoading(false);
-            addToScanRecents(currentProduct);
-            _showScanConfirm(currentProduct.name);
-            stopScanner();
-            setTimeout(() => showProductAction(), 300);
-            return;
-        }
-        
-        // Lookup in external DB
-        const lookupResult = await api('lookup_barcode', { barcode });
-        if (lookupResult.found && lookupResult.product) {
-            const p = lookupResult.product;
-            // Detect unit and quantity from quantity_info
-            const detected = detectUnitAndQuantity(p.quantity_info);
-            
-            // Build rich notes with all available info
-            const notesParts = [];
-            if (p.quantity_info) notesParts.push(`${t('product.weight_label')}: ${p.quantity_info}`);
-            if (p.nutriscore) notesParts.push(`Nutriscore: ${p.nutriscore.toUpperCase()}`);
-            if (p.nova_group) notesParts.push(`NOVA: ${p.nova_group}`);
-            if (p.ecoscore) notesParts.push(`Ecoscore: ${p.ecoscore.toUpperCase()}`);
-            if (p.origin) notesParts.push(`${t('product.origin_label')}: ${p.origin}`);
-            if (p.labels) notesParts.push(`${t('product.labels_label')}: ${p.labels}`);
-            
-            // Save to local DB
-            const saveResult = await api('product_save', {}, 'POST', {
-                barcode: barcode,
-                name: p.name || t('product.not_recognized'),
-                brand: p.brand || '',
-                category: p.category || '',
-                image_url: p.image_url || '',
-                unit: detected.unit,
-                default_quantity: detected.quantity,
-                package_unit: detected.packageUnit || '',
-                notes: notesParts.join(' · '),
-            });
-            
-            if (saveResult.id) {
-                currentProduct = {
-                    id: saveResult.id,
-                    barcode: barcode,
-                    name: p.name || t('product.not_recognized'),
-                    brand: p.brand || '',
-                    category: p.category || '',
-                    image_url: p.image_url || '',
-                    unit: detected.unit,
-                    default_quantity: detected.quantity,
-                    package_unit: detected.packageUnit || '',
-                    _confCount: detected.confCount || 0,
-                    weight_info: p.quantity_info || '',
-                    nutriscore: p.nutriscore || '',
-                    ingredients: p.ingredients || '',
-                    allergens: p.allergens || '',
-                    conservation: p.conservation || '',
-                    origin: p.origin || '',
-                    nova_group: p.nova_group || '',
-                    ecoscore: p.ecoscore || '',
-                    labels: p.labels || '',
-                    stores: p.stores || '',
-                };
-                showLoading(false);
-                addToScanRecents(currentProduct);
-                _showScanConfirm(currentProduct.name);
-                stopScanner();
-                setTimeout(() => showProductAction(), 300);
-                return;
-            }
-        }
-        
-        // Not found — keep camera running and let user scan again or add manually
+        const code = _barcodeCacheKey(barcode);
+        const result = await _resolveBarcodeLookup(code);
+        if (await _handleBarcodeResolve(result, code)) return;
+
         showLoading(false);
         showToast(t('error.not_found_manual'), 'error');
         _setScanStatus(t('scan.status_scanning'), '', '');
         resumeScanner();
-        
     } catch (err) {
         showLoading(false);
         console.error('Barcode lookup error:', err);
@@ -8373,7 +8513,7 @@ function showProductAction() {
     
     // Always build the edit form, but only show it auto-opened for unknown products
     const categoryOptions = Object.entries(CATEGORY_LABELS).map(([key, label]) => 
-        `<option value="${key}" ${mapToLocalCategory(currentProduct.category, currentProduct.name) === key ? 'selected' : ''}>${label}</option>`
+        `<option value="${key}" ${mapToLocalCategory(currentProduct.category, currentProduct.name, currentProduct.brand) === key ? 'selected' : ''}>${label}</option>`
     ).join('');
     
     editInfoEl.innerHTML = `
@@ -8395,6 +8535,10 @@ function showProductAction() {
                         <option value="">${t('form.select_placeholder')}</option>
                         ${categoryOptions}
                     </select>
+                </div>
+                <div class="form-group">
+                    <label>${t('product.notes_label')}</label>
+                    <textarea id="edit-action-notes" class="form-input" rows="2" placeholder="${escapeHtml(t('product.notes_placeholder') || '')}">${escapeHtml(currentProduct.notes || '')}</textarea>
                 </div>
                 <button type="button" class="btn btn-primary full-width" onclick="saveEditedProductInfo()">${t('btn.save_info')}</button>
             </div>
@@ -8621,7 +8765,7 @@ function editProductFromAction() {
     document.getElementById('pf-brand').setAttribute('list', 'common-brands');
 
     // Set category
-    const cat = mapToLocalCategory(currentProduct.category, currentProduct.name);
+    const cat = mapToLocalCategory(currentProduct.category, currentProduct.name, currentProduct.brand);
     document.getElementById('pf-category').value = cat;
     document.getElementById('pf-category').dataset.manuallySet = 'true';
     document.getElementById('pf-defqty').dataset.manuallySet = 'true';
@@ -8754,6 +8898,7 @@ function editActionInventoryItem(inventoryId) {
         </form>
     `;
     document.getElementById('modal-overlay').style.display = 'flex';
+    _initExpiryManualTracking('action-edit-expiry', item);
 }
 
 function onActionEditUnitChange() {
@@ -8770,7 +8915,8 @@ async function submitActionEditInventory(e, id, productId) {
     const unit = document.getElementById('action-edit-unit').value;
     
     const payload = { id, quantity: qty, location: loc, expiry_date: expiry, unit, product_id: productId,
-        vacuum_sealed: document.getElementById('action-edit-vacuum')?.checked ? 1 : 0 };
+        vacuum_sealed: document.getElementById('action-edit-vacuum')?.checked ? 1 : 0,
+        expiry_user_set: _expiryUserSetPayload('action-edit-expiry') };
     
     if (unit === 'conf') {
         payload.package_unit = document.getElementById('action-edit-conf-unit')?.value || '';
@@ -9015,6 +9161,7 @@ async function saveEditedProductInfo() {
     }
     const brand = (document.getElementById('edit-action-brand')?.value || '').trim();
     const category = document.getElementById('edit-action-category')?.value || '';
+    const notes = (document.getElementById('edit-action-notes')?.value || '').trim();
     
     showLoading(true);
     try {
@@ -9027,13 +9174,14 @@ async function saveEditedProductInfo() {
             image_url: currentProduct.image_url || '',
             unit: currentProduct.unit || 'pz',
             default_quantity: currentProduct.default_quantity || 1,
-            notes: currentProduct.notes || '',
+            notes: notes,
         });
         showLoading(false);
         if (result.success) {
             // Update current product in memory
             currentProduct.name = name;
             currentProduct.brand = brand;
+            currentProduct.notes = notes;
             if (category) currentProduct.category = category;
             showToast(t('toast.product_updated'), 'success');
             // Refresh the action page with updated data
@@ -9168,6 +9316,7 @@ function showAddForm() {
     
     showPage('add');
     updateScaleReadButtons();
+    _initExpiryManualTracking('add-expiry');
     // History first (≥3 samples → average of last 3); AI only if history is insufficient
     (async () => {
         let hasHistory = false;
@@ -9193,6 +9342,7 @@ function onVacuumSealedChange() {
 }
 
 function recalculateAddExpiry() {
+    if (_isExpiryManuallySet('add-expiry')) return;
     if (!currentProduct) return;
     const loc = document.getElementById('add-location')?.value || '';
     const isVacuum = document.getElementById('add-vacuum-sealed')?.checked;
@@ -9238,18 +9388,20 @@ async function _fetchExpiryHistoryAndUpdate(productId) {
                 _aiProductHintController = null;
             }
             document.getElementById('ai-hint-loading')?.remove();
-            const loc = document.getElementById('add-location')?.value || '';
-            const isVacuum = document.getElementById('add-vacuum-sealed')?.checked;
-            let days = isVacuum ? getVacuumExpiryDays(data.avg_days) : data.avg_days;
-            const newDate = addDays(days);
-            const newLabel = formatEstimatedExpiry(days);
-            const suffix = ` <span class="history-badge" title="${t('add.history_badge_tip').replace('{n}', String(data.count))}">${t('product.history_badge')}</span>`;
-            const expiryInput = document.getElementById('add-expiry');
-            const estimateEl = document.querySelector('.expiry-estimate-label');
-            const dateEl = document.querySelector('.expiry-estimate-date');
-            if (expiryInput) expiryInput.value = newDate;
-            if (estimateEl) estimateEl.innerHTML = `${t('add.estimated_expiry')} <strong>${newLabel}${suffix}</strong>`;
-            if (dateEl) dateEl.textContent = formatDate(newDate);
+            if (!_isExpiryManuallySet('add-expiry')) {
+                const loc = document.getElementById('add-location')?.value || '';
+                const isVacuum = document.getElementById('add-vacuum-sealed')?.checked;
+                let days = isVacuum ? getVacuumExpiryDays(data.avg_days) : data.avg_days;
+                const newDate = addDays(days);
+                const newLabel = formatEstimatedExpiry(days);
+                const suffix = ` <span class="history-badge" title="${t('add.history_badge_tip').replace('{n}', String(data.count))}">${t('product.history_badge')}</span>`;
+                const expiryInput = document.getElementById('add-expiry');
+                const estimateEl = document.querySelector('.expiry-estimate-label');
+                const dateEl = document.querySelector('.expiry-estimate-date');
+                if (expiryInput) expiryInput.value = newDate;
+                if (estimateEl) estimateEl.innerHTML = `${t('add.estimated_expiry')} <strong>${newLabel}${suffix}</strong>`;
+                if (dateEl) dateEl.textContent = formatDate(newDate);
+            }
             window._addBaseExpiryDays = data.avg_days;
             return true;
         }
@@ -9305,7 +9457,7 @@ async function _applyAIProductHint() {
         }
 
         // Update expiry only if we have no historical data (history takes priority)
-        if (!window._historyExpiryDays) {
+        if (!window._historyExpiryDays && !_isExpiryManuallySet('add-expiry')) {
             window._addBaseExpiryDays = data.expiry_days;
             const newDate  = addDays(data.expiry_days);
             const newLabel = formatEstimatedExpiry(data.expiry_days);
@@ -9465,6 +9617,7 @@ function selectPurchaseType(btn, type) {
         `;
         // Restore quantity - switching purchase type should NOT change it
         document.getElementById('add-quantity').value = currentQty;
+        _initExpiryManualTracking('add-expiry');
         // Show multi-batch section only in "new" mode (and only for conf unit)
         const mbSection = document.getElementById('multi-batch-section');
         if (mbSection) mbSection.style.display = (document.getElementById('add-unit')?.value === 'conf') ? 'block' : 'none';
@@ -9489,6 +9642,7 @@ function selectPurchaseType(btn, type) {
                 </div>
             </div>
         `;
+        _initExpiryManualTracking('add-expiry');
         // DON'T auto-set remaining percentage - keep the quantity the user already entered
         // Hide multi-batch section in "existing" mode
         const mbSection = document.getElementById('multi-batch-section');
@@ -9651,6 +9805,7 @@ async function submitAdd(e) {
             quantity: parseFloat(document.getElementById('add-quantity').value) || 1,
             location: document.getElementById('add-location').value,
             expiry_date: document.getElementById('add-expiry').value || null,
+            expiry_user_set: _expiryUserSetPayload('add-expiry'),
             unit: selectedUnit !== productUnit ? selectedUnit : null,
             package_unit: selectedUnit === 'conf' ? (document.getElementById('add-conf-unit')?.value || null) : null,
             package_size: selectedUnit === 'conf' ? (parseFloat(document.getElementById('add-conf-size')?.value) || null) : null,
@@ -10640,33 +10795,38 @@ async function confirmMoveAfterUse(productId, fromLoc, toLoc, openedId, forcedVa
     closeModal();
     showLoading(true);
     try {
+        const invData = await api('inventory_list');
+        const invRows = invData.inventory || [];
         if (openedId) {
-            // Move only the specific opened row — use opened shelf life
-            const product = { name: currentProduct?.name || '', category: currentProduct?.category || '' };
-            let days = estimateOpenedExpiryDays(product, toLoc);
-            await api('inventory_update', {}, 'POST', {
+            const item = invRows.find(i => i.id == openedId);
+            const product = { name: currentProduct?.name || item?.name || '', category: currentProduct?.category || item?.category || '' };
+            const payload = {
                 id: openedId,
                 location: toLoc,
-                expiry_date: addDays(days),
                 product_id: productId,
                 vacuum_sealed: newVacuum,
-            });
+            };
+            if (!item?.expiry_user_set) {
+                payload.expiry_date = addDays(estimateOpenedExpiryDays(product, toLoc));
+            }
+            await api('inventory_update', {}, 'POST', payload);
             showToast(t('move.moved_toast').replace('{location}', LOCATIONS[toLoc]?.label || toLoc), 'success');
         } else {
-            // Legacy: move whatever is at fromLoc
-            const data = await api('inventory_list');
-            const item = (data.inventory || []).find(i => i.product_id == productId && i.location === fromLoc && parseFloat(i.quantity) > 0);
+            const item = invRows.find(i => i.product_id == productId && i.location === fromLoc && parseFloat(i.quantity) > 0);
             if (item) {
                 const product = { name: item.name || '', category: item.category || '' };
-                let days = estimateExpiryDays(product, toLoc);
-                if (newVacuum) days = getVacuumExpiryDays(days);
-                await api('inventory_update', {}, 'POST', {
+                const payload = {
                     id: item.id,
                     location: toLoc,
-                    expiry_date: addDays(days),
                     product_id: productId,
                     vacuum_sealed: newVacuum,
-                });
+                };
+                if (!item.expiry_user_set) {
+                    let days = estimateExpiryDays(product, toLoc);
+                    if (newVacuum) days = getVacuumExpiryDays(days);
+                    payload.expiry_date = addDays(days);
+                }
+                await api('inventory_update', {}, 'POST', payload);
                 showToast(t('move.moved_simple', { location: LOCATIONS[toLoc]?.label || toLoc }), 'success');
             }
         }
@@ -13068,7 +13228,7 @@ async function renderShoppingItems() {
 
         html += `<div class="shopping-section-divider"><span class="sec-icon">${secDef.icon}</span>${secDef.label}</div>`;
 
-        for (const { item, idx, smartData, urgency, duplicateNames } of group.items) {
+        for (const { item, idx, smartData, urgency, duplicateNames = [] } of group.items) {
             const catIcon = CATEGORY_ICONS[guessCategoryFromName(item.name)] || '🛒';
             const bgStyle = urgency && URGENCY_BG[urgency] ? ` style="background:${URGENCY_BG[urgency]}"` : '';
             const localTags = getShoppingTags(item.name);
@@ -13543,10 +13703,11 @@ async function analyzeExpiryImage(dataUrl) {
         const result = await api('gemini_expiry', {}, 'POST', { image: base64 });
         
         if (result.success && result.expiry_date) {
-            // Auto-fill the expiry date
+            // Auto-fill the expiry date (treat as user-provided)
             const expiryInput = document.getElementById('add-expiry');
             if (expiryInput) {
                 expiryInput.value = result.expiry_date;
+                expiryInput.dataset.manuallySet = 'true';
             }
             statusDiv.innerHTML = `<p style="color:var(--success);font-weight:600">✅ ${t('scanner.expiry_found')}: ${formatDate(result.expiry_date)}</p>`;
             
@@ -14766,29 +14927,38 @@ async function confirmRecipeMove(productId, fromLoc, toLoc, openedId, forcedVacu
     const newVacuum = forcedVacuum !== undefined ? (forcedVacuum ? 1 : 0) : (document.getElementById('move-vacuum-check')?.checked ? 1 : 0);
     closeModal();
     try {
+        const invData = await api('inventory_list');
+        const invRows = invData.inventory || [];
         if (openedId) {
-            let days = estimateExpiryDays({ name: '', category: '' }, toLoc);
-            if (newVacuum) days = getVacuumExpiryDays(days);
-            await api('inventory_update', {}, 'POST', {
+            const item = invRows.find(i => i.id == openedId);
+            const product = { name: item?.name || '', category: item?.category || '' };
+            const payload = {
                 id: openedId,
                 location: toLoc,
-                expiry_date: addDays(days),
                 product_id: productId,
                 vacuum_sealed: newVacuum,
-            });
-        } else {
-            const data = await api('inventory_list');
-            const item = (data.inventory || []).find(i => i.product_id == productId && i.location === fromLoc && parseFloat(i.quantity) > 0);
-            if (item) {
-                let days = estimateExpiryDays({ name: item.name || '', category: item.category || '' }, toLoc);
+            };
+            if (!item?.expiry_user_set) {
+                let days = estimateExpiryDays(product, toLoc);
                 if (newVacuum) days = getVacuumExpiryDays(days);
-                await api('inventory_update', {}, 'POST', {
+                payload.expiry_date = addDays(days);
+            }
+            await api('inventory_update', {}, 'POST', payload);
+        } else {
+            const item = invRows.find(i => i.product_id == productId && i.location === fromLoc && parseFloat(i.quantity) > 0);
+            if (item) {
+                const payload = {
                     id: item.id,
                     location: toLoc,
-                    expiry_date: addDays(days),
                     product_id: productId,
                     vacuum_sealed: newVacuum,
-                });
+                };
+                if (!item.expiry_user_set) {
+                    let days = estimateExpiryDays({ name: item.name || '', category: item.category || '' }, toLoc);
+                    if (newVacuum) days = getVacuumExpiryDays(days);
+                    payload.expiry_date = addDays(days);
+                }
+                await api('inventory_update', {}, 'POST', payload);
             }
         }
         showToast(t('move.moved_simple', { location: LOCATIONS[toLoc]?.label || toLoc }), 'success');
@@ -17169,8 +17339,10 @@ function _handleOfflineApi(action, params, body) {
         if (cached) return { ...cached, _offline: true };
         return { success: false, _offline: true };
     }
-    if (action === 'search_barcode') {
-        return _offlineSearchBarcode(params && params.barcode);
+    if (action === 'search_barcode' || action === 'resolve_barcode') {
+        const found = _offlineSearchBarcode(params && params.barcode);
+        if (found.found) return { ...found, source: 'local' };
+        return { found: false, source: 'offline' };
     }
     if (action === 'products_search') {
         const q = String((params && params.q) || '').trim().toLowerCase();
@@ -18138,6 +18310,7 @@ async function spesaModeAfterAdd() {
             product_id: currentProduct.id,
         });
         updateSpesaBanner();
+        _shoppingInventoryCache = null;
         await _spesaRemovePurchasedFromList(currentProduct);
         const addLoc = document.getElementById('add-location')?.value || 'dispensa';
         _showFamilySiblingSuggest(currentProduct.id, addLoc);
@@ -18170,6 +18343,41 @@ async function _spesaRemovePurchasedFromList(product) {
     _markBringPurchased(namesToMark);
 }
 
+const _FAMILY_SIBLING_CONFIRM_TTL = 24 * 60 * 60 * 1000;
+
+function _familySiblingConfirmKey(family, location) {
+    return `${String(family || '').trim().toLowerCase()}|${location || 'dispensa'}`;
+}
+
+function _getFamilySiblingConfirmed() {
+    const map = Object.assign({}, _familySiblingConfirmedCache || {});
+    const now = Date.now();
+    let changed = false;
+    for (const key of Object.keys(map)) {
+        if (now - map[key] > _FAMILY_SIBLING_CONFIRM_TTL) { delete map[key]; changed = true; }
+    }
+    if (changed) {
+        _familySiblingConfirmedCache = map;
+        _saveToServer('family_sibling_confirmed', map);
+    }
+    return map;
+}
+
+function _isFamilySiblingRecentlyConfirmed(family, location) {
+    if (!family) return false;
+    const map = _getFamilySiblingConfirmed();
+    const ts = map[_familySiblingConfirmKey(family, location)];
+    return !!ts && (Date.now() - ts) < _FAMILY_SIBLING_CONFIRM_TTL;
+}
+
+function _recordFamilySiblingConfirmed(family, location) {
+    if (!family) return;
+    const map = _getFamilySiblingConfirmed();
+    map[_familySiblingConfirmKey(family, location)] = Date.now();
+    _familySiblingConfirmedCache = map;
+    _saveToServer('family_sibling_confirmed', map);
+}
+
 let _familySiblingDismissTimer = null;
 
 function _dismissFamilySiblingPrompt() {
@@ -18187,23 +18395,58 @@ function _formatFamilySiblingDate(dtStr) {
     return d.toLocaleDateString(loc, { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
+/** Parse "20g" / "500 ml" from product name when package size missing in catalog. */
+function _inferPackageSizeFromName(name) {
+    const m = (name || '').match(/\b(\d+(?:[.,]\d+)?)\s*(g|ml|kg|l|lt)\b/i);
+    if (!m) return null;
+    let val = parseFloat(String(m[1]).replace(',', '.'));
+    const u = m[2].toLowerCase();
+    if (u === 'kg') { val *= 1000; return { qty: val, unit: 'g' }; }
+    if (u === 'l' || u === 'lt') { val *= 1000; return { qty: val, unit: 'ml' }; }
+    return { qty: val, unit: u };
+}
+
+/** Human-readable stock for spesa family-sibling check (e.g. "4 conf (da 20g)"). */
+function _formatFamilySiblingStockLine(s) {
+    let defQty = parseFloat(s.default_quantity) || 0;
+    let pkgUnit = s.package_unit || '';
+    const inferred = _inferPackageSizeFromName(s.name);
+    if (inferred && (!defQty || (s.unit === 'conf' && defQty < inferred.qty))) {
+        defQty = inferred.qty;
+        pkgUnit = inferred.unit;
+    }
+    const unit = s.unit || 'pz';
+    const qty = parseFloat(s.stock_qty) || 0;
+    const parts = formatQuantityParts(qty, unit, defQty, pkgUnit);
+    if (parts.unitLabel) {
+        let line = `${parts.mainQty} ${parts.unitLabel}`;
+        if (parts.packageDetail) line += ` (${parts.packageDetail})`;
+        if (parts.fraction) line += ` ${parts.fraction}`;
+        return line;
+    }
+    return formatQuantity(qty, unit, defQty, pkgUnit).replace(/<[^>]*>/g, '');
+}
+
 /** Optional hint: same-family product in the same location (non-blocking). */
 function _showFamilySiblingSuggest(productId, location) {
     _dismissFamilySiblingPrompt();
     const loc = location || 'dispensa';
-    api('family_sibling_suggest', {}, 'POST', { product_id: productId, location: loc }).then(data => {
+    const earlyFamily = (currentProduct?.shopping_name || '').trim();
+    if (earlyFamily && _isFamilySiblingRecentlyConfirmed(earlyFamily, loc)) return;
+    api('family_sibling_suggest', {}, 'POST', { product_id: productId, location: loc }).then(async data => {
         if (!data?.success || !data.sibling) return;
         const s = data.sibling;
+        if (_isFamilySiblingRecentlyConfirmed(s.family, loc)) return;
+        if (!(await _productHasLiveStock(s.product_id))) return;
         const locKey = s.location || loc;
         const locInfo = LOCATIONS[locKey] || LOCATIONS.altro;
-        const qtyStr = `${s.stock_qty} ${s.unit}`;
+        const stockLine = _formatFamilySiblingStockLine(s);
         const purchaseRaw = s.last_purchase_at || s.added_at;
         const purchaseDate = _formatFamilySiblingDate(purchaseRaw);
         const productLine = s.brand ? `${s.name} (${s.brand})` : s.name;
         const catIcon = CATEGORY_ICONS[mapToLocalCategory(s.category, s.name)] || '📦';
         const metaParts = [
             `${locInfo.icon} ${locInfo.label}`,
-            qtyStr,
             purchaseDate ? purchaseDate : '',
         ].filter(Boolean);
         const thumbHtml = s.image_url
@@ -18217,8 +18460,8 @@ function _showFamilySiblingSuggest(productId, location) {
             <div class="family-sibling-prompt-body">
                 <div class="family-sibling-prompt-thumb">${thumbHtml}</div>
                 <div class="family-sibling-prompt-info">
-                    <div class="family-sibling-prompt-title">${escapeHtml(t('shopping.family_sibling_title', { location: locInfo.label }))}</div>
-                    <div class="family-sibling-prompt-name">${escapeHtml(productLine)}</div>
+                    <div class="family-sibling-prompt-title">${escapeHtml(t('shopping.family_sibling_check', { name: productLine }))}</div>
+                    <div class="family-sibling-prompt-stock">${escapeHtml(t('shopping.family_sibling_stock', { qty: stockLine }))}</div>
                     <div class="family-sibling-prompt-meta">${escapeHtml(metaParts.join(' · '))}</div>
                     <div class="family-sibling-prompt-question">${escapeHtml(t('shopping.family_sibling_question'))}</div>
                 </div>
@@ -18230,7 +18473,10 @@ function _showFamilySiblingSuggest(productId, location) {
         `;
         document.body.appendChild(bar);
 
-        bar.querySelector('#_fam-sib-yes').addEventListener('click', _dismissFamilySiblingPrompt);
+        bar.querySelector('#_fam-sib-yes').addEventListener('click', () => {
+            _recordFamilySiblingConfirmed(s.family, locKey);
+            _dismissFamilySiblingPrompt();
+        });
         bar.querySelector('#_fam-sib-no').addEventListener('click', () => {
             _dismissFamilySiblingPrompt();
             if (s.inventory_id) editInventoryItem(s.inventory_id);
@@ -18710,9 +18956,9 @@ async function _runStartupCheck() {
     if (spinnerEl) spinnerEl.style.display = 'none';
     wrapEl.style.display = '';
 
-    // Helper: set progress bar + crossfade status text
+    // Helper: set progress bar + crossfade status text (function decl avoids TDZ if called early)
     let _curPct = 0;
-    const setProgress = (pct, label, state) => {
+    function setProgress(pct, label, state) {
         _curPct = pct;
         if (barEl) {
             barEl.style.width = pct + '%';
@@ -18733,7 +18979,7 @@ async function _runStartupCheck() {
         // Direct update — checks fire every 40ms, any fade would hide most labels
         el.className = `preloader-status-text ${sc}`;
         el.textContent = cleanLabel;
-    };
+    }
 
     // Auto-provision API token for same-origin browser sessions
     if (typeof ensureApiToken === 'function') {
