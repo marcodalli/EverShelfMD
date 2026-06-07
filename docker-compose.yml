@@ -4,6 +4,7 @@ services:
   evershelf:
     build: .
     container_name: evershelf
+    restart: unless-stopped
     deploy:
       labels:
         - traefik.enable=true
@@ -19,7 +20,6 @@ services:
         target: "/var/www/html/data"
       # Mount your local .env configuration
       - ./.env:/var/www/html/.env:ro
-    restart: unless-stopped
     environment:
       - TZ=Europe/Rome
 
