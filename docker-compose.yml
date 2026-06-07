@@ -1,18 +1,28 @@
+version: '3.8'
+
 services:
   evershelf:
     build: .
     container_name: evershelf
-    ports:
-      - "8080:80"
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.constraint-label=traefik-public
+        - traefik.http.routers.paperless.rule=Host(`gnamme.marcodalli.net`)
+        - traefik.http.services.paperless.loadbalancer.server.port=8080
+        - traefik.http.routers.paperless.entrypoints=https
+        - traefik.http.routers.paperless.tls=true
+        - traefik.http.routers.paperless.tls.certresolver=le 
     volumes:
-      # Persist database and runtime data
-      - evershelf_data:/var/www/html/data
+      - type: bind
+        source: "/mnt/gluster-vol1/evershelf/evershelf_data"
+        target: "/var/www/html/data"
       # Mount your local .env configuration
       - ./.env:/var/www/html/.env:ro
     restart: unless-stopped
     environment:
       - TZ=Europe/Rome
 
-volumes:
-  evershelf_data:
-    driver: local
+networks:
+  traefik-public:
+    external: true
